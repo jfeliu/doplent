@@ -31,7 +31,7 @@ DEBUG = os.environ.get('DJANGO_DEBUG', 'True') == 'True'
 
 ALLOWED_HOSTS = os.environ.get(
     'DJANGO_ALLOWED_HOSTS',
-    '192.168.18.17,192.168.18.29,localhost,127.0.0.1',
+    '192.168.18.35,192.168.18.29,localhost,127.0.0.1',
 ).split(',')
 
 
