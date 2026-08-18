@@ -1,15 +1,37 @@
 import datetime
 
-from django.contrib.auth.models import User
+from django.contrib.auth.models import Permission, User
+from django.contrib.contenttypes.models import ContentType
 from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase
+from django.urls import reverse
 
+from .calendar import LANE_MIN_WIDTH, build_week_calendar
 from .importer import import_teachers_from_csv
 from .models import Teacher, WeeklyNonTeachingHours
 
 
 def csv_file(content: str) -> SimpleUploadedFile:
     return SimpleUploadedFile("teachers.csv", content.encode("utf-8"), content_type="text/csv")
+
+
+def make_teacher(first_name: str, last_name: str, active: bool = True) -> Teacher:
+    user = User.objects.create_user(
+        username=f"{first_name}.{last_name}".lower(), first_name=first_name, last_name=last_name
+    )
+    return Teacher.objects.create(user=user, grade_level=Teacher.GradeLevel.PRIMARY, active=active)
+
+
+def add_hours(teacher: Teacher, weekday: int, start: str, end: str, is_paperwork: bool = False):
+    start_hour, start_minute = (int(part) for part in start.split(":"))
+    end_hour, end_minute = (int(part) for part in end.split(":"))
+    return WeeklyNonTeachingHours.objects.create(
+        teacher=teacher,
+        weekday=weekday,
+        start_time=datetime.time(start_hour, start_minute),
+        end_time=datetime.time(end_hour, end_minute),
+        is_paperwork=is_paperwork,
+    )
 
 
 class ImportTeachersFromCsvTests(TestCase):
@@ -177,3 +199,89 @@ class ImportTeachersFromCsvTests(TestCase):
         self.assertTrue(result.ok)
         username, _password = result.created_users[0]
         self.assertEqual(username, "maryjane.vanderberg")
+
+
+MONDAY = WeeklyNonTeachingHours.Weekday.MONDAY
+
+
+class BuildWeekCalendarTests(TestCase):
+    def _monday(self, calendar):
+        return next(day for day in calendar["days"] if day["value"] == MONDAY)
+
+    def test_every_block_carries_its_teacher_name(self):
+        add_hours(make_teacher("Jane", "Doe"), MONDAY, "08:00", "09:30")
+        add_hours(make_teacher("John", "Smith"), MONDAY, "08:00", "09:00")
+
+        blocks = self._monday(build_week_calendar())["blocks"]
+
+        self.assertEqual({"Jane Doe", "John Smith"}, {block.teacher_name for block in blocks})
+
+    def test_day_widens_with_overlapping_lanes_so_names_stay_readable(self):
+        for index in range(4):
+            add_hours(make_teacher("Teacher", f"Number{index}"), MONDAY, "08:00", "09:00")
+
+        calendar = build_week_calendar()
+        monday = self._monday(calendar)
+        tuesday = next(day for day in calendar["days"] if day["value"] == WeeklyNonTeachingHours.Weekday.TUESDAY)
+
+        self.assertEqual(monday["min_width"], 4 * LANE_MIN_WIDTH)
+        self.assertEqual(tuesday["min_width"], LANE_MIN_WIDTH)
+
+    def test_short_block_puts_name_and_time_on_one_line(self):
+        teacher = make_teacher("Jane", "Doe")
+        add_hours(teacher, MONDAY, "08:00", "08:15")
+        add_hours(teacher, MONDAY, "09:00", "11:00")
+
+        short, long = self._monday(build_week_calendar())["blocks"]
+
+        self.assertTrue(short.inline)
+        self.assertFalse(short.show_time)  # only room for the name
+        self.assertFalse(long.inline)
+        self.assertTrue(long.show_time)
+        self.assertTrue(long.wrap)
+
+    def test_each_teacher_gets_a_distinct_colour_listed_in_the_legend(self):
+        add_hours(make_teacher("Zoe", "Alba"), MONDAY, "08:00", "09:00")
+        add_hours(make_teacher("Adam", "Bell"), MONDAY, "10:00", "11:00")
+
+        calendar = build_week_calendar()
+        legend = calendar["teacher_legend"]
+
+        self.assertEqual(["Adam Bell", "Zoe Alba"], [entry["name"] for entry in legend])
+        self.assertEqual(2, len({entry["color"] for entry in legend}))
+        colors_by_name = {entry["name"]: entry["color"] for entry in legend}
+        for block in self._monday(calendar)["blocks"]:
+            self.assertEqual(colors_by_name[block.teacher_name], block.color)
+
+    def test_inactive_teachers_are_left_out(self):
+        add_hours(make_teacher("Gone", "Away", active=False), MONDAY, "08:00", "09:00")
+
+        calendar = build_week_calendar()
+
+        self.assertFalse(calendar["has_entries"])
+        self.assertEqual([], calendar["teacher_legend"])
+        self.assertEqual([], self._monday(calendar)["blocks"])
+
+
+class WeeklyCalendarAdminViewTests(TestCase):
+    def setUp(self):
+        staff = User.objects.create_user(username="staff_calendar", password="pw", is_staff=True)
+        staff.user_permissions.set(Permission.objects.filter(content_type=ContentType.objects.get_for_model(Teacher)))
+        self.client.force_login(staff)
+        add_hours(make_teacher("Jane", "Doe"), MONDAY, "08:00", "09:30")
+
+    def test_style_values_use_a_decimal_point_regardless_of_active_language(self):
+        # Django localizes {{ float }} output per the active language, and
+        # Catalan (like most of Europe) uses a comma for decimals - which
+        # would silently corrupt every inline "top/height/left/width" CSS
+        # value on this page (e.g. "12,5%" instead of "12.5%") and collapse
+        # the whole calendar to nothing. {% localize off %} in the template
+        # is what prevents this.
+        self.client.cookies["django_language"] = "ca"
+
+        response = self.client.get(reverse("admin:teachers_teacher_weekly_calendar"))
+
+        self.assertEqual(response.status_code, 200)
+        html = response.content.decode()
+        self.assertIn("dilluns", html)  # confirms Catalan really is active
+        self.assertNotRegex(html, r"\d,\d")

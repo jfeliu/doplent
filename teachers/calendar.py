@@ -14,6 +14,17 @@ DEFAULT_DAY_START = 8 * 60
 DEFAULT_DAY_END = 17 * 60
 PX_PER_MINUTE = 1.2
 
+# Whatever a day's overlap looks like, every lane keeps at least this much room
+# so a teacher's name stays readable; busy days scroll sideways instead.
+LANE_MIN_WIDTH = 104
+
+# A block needs some vertical room before the name and the times can sit on
+# separate lines, and a little before the times are worth showing at all. The
+# name itself is always rendered.
+STACKED_MIN_HEIGHT = 34
+TIME_MIN_HEIGHT = 20
+WRAP_MIN_HEIGHT = 52
+
 
 def _minutes(t: time) -> int:
     return t.hour * 60 + t.minute
@@ -30,7 +41,23 @@ class Block:
     height: float = 0.0
     left: float = 0.0
     width: float = 0.0
-    compact: bool = False
+    inline: bool = False
+    show_time: bool = True
+    wrap: bool = False
+
+
+def _assign_colors(entries) -> tuple[dict[int, str], list[dict]]:
+    """Give each teacher their own palette color, handed out in name order so
+    the legend reads alphabetically. The palette wraps around if there are more
+    teachers than colors, so two teachers can share one on a large roster."""
+    names: dict[int, str] = {}
+    for entry in entries:
+        names.setdefault(entry.teacher_id, str(entry.teacher))
+
+    ordered = sorted(names.items(), key=lambda item: item[1].lower())
+    colors = {teacher_id: PALETTE[index % len(PALETTE)] for index, (teacher_id, _) in enumerate(ordered)}
+    legend = [{"name": name, "color": colors[teacher_id]} for teacher_id, name in ordered]
+    return colors, legend
 
 
 def build_week_calendar():
@@ -63,26 +90,33 @@ def build_week_calendar():
     for entry in entries:
         by_day[entry.weekday].append(entry)
 
-    days = [
-        {
-            "value": weekday,
-            "label": WeeklyNonTeachingHours.Weekday(weekday).label,
-            "blocks": _layout_day(by_day[weekday], day_start, total_range),
-        }
-        for weekday in weekday_values
-    ]
+    colors, legend = _assign_colors(entries)
+
+    days = []
+    for weekday in weekday_values:
+        blocks, lanes = _layout_day(by_day[weekday], day_start, total_range, colors)
+        days.append(
+            {
+                "value": weekday,
+                "label": WeeklyNonTeachingHours.Weekday(weekday).label,
+                "blocks": blocks,
+                "min_width": lanes * LANE_MIN_WIDTH,
+            }
+        )
 
     return {
         "hours": hours,
         "days": days,
         "has_entries": bool(entries),
         "calendar_height": total_range * PX_PER_MINUTE,
+        "teacher_legend": legend,
     }
 
 
-def _layout_day(entries, day_start, total_range):
+def _layout_day(entries, day_start, total_range, colors) -> tuple[list[Block], int]:
     """Assigns each entry a side-by-side lane so overlapping blocks never
-    visually collide, using a simple greedy interval-graph-coloring pass."""
+    visually collide, using a simple greedy interval-graph-coloring pass.
+    Returns the blocks plus how many lanes the day needed."""
     lane_end = []
     assignments = []
     for entry in sorted(entries, key=lambda e: _minutes(e.start_time)):
@@ -99,18 +133,21 @@ def _layout_day(entries, day_start, total_range):
     for entry, lane in assignments:
         start = _minutes(entry.start_time)
         end = _minutes(entry.end_time)
+        height_px = (end - start) * PX_PER_MINUTE
         blocks.append(
             Block(
                 teacher_name=str(entry.teacher),
                 is_paperwork=entry.is_paperwork,
                 start=entry.start_time,
                 end=entry.end_time,
-                color=PALETTE[entry.teacher_id % len(PALETTE)],
+                color=colors[entry.teacher_id],
                 top=(start - day_start) / total_range * 100,
                 height=(end - start) / total_range * 100,
                 left=lane / total_lanes * 100,
                 width=100 / total_lanes,
-                compact=total_lanes > 3,
+                inline=height_px < STACKED_MIN_HEIGHT,
+                show_time=height_px >= TIME_MIN_HEIGHT,
+                wrap=height_px >= WRAP_MIN_HEIGHT,
             )
         )
-    return blocks
+    return blocks, total_lanes

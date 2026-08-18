@@ -1,5 +1,5 @@
 {% extends "admin/base_site.html" %}
-{% load i18n %}
+{% load i18n l10n %}
 
 {% block extrastyle %}
 {{ block.super }}
@@ -12,9 +12,12 @@
     overflow: hidden;
     background: var(--body-bg);
   }
-  .calendar-times { width: 56px; flex: none; position: relative; border-right: 1px solid var(--hairline-color); }
-  .calendar-days { display: flex; flex: 1; min-width: 0; }
-  .calendar-day { flex: 1; min-width: 0; border-right: 1px solid var(--hairline-color); }
+  .calendar-times { width: 56px; flex: none; border-right: 1px solid var(--hairline-color); }
+  .calendar-days { display: flex; flex: 1; min-width: 0; overflow-x: auto; }
+  /* Lanes never shrink below a legible width (see LANE_MIN_WIDTH), so a busy
+     day widens its column and the week scrolls sideways instead of squeezing
+     the names out of the blocks. */
+  .calendar-day { flex: 1 0 auto; border-right: 1px solid var(--hairline-color); }
   .calendar-day:last-child { border-right: none; }
   .calendar-header {
     height: 36px;
@@ -29,7 +32,7 @@
     background: var(--darkened-bg);
     color: var(--body-quiet-color);
   }
-  .calendar-day-body, .calendar-times { position: relative; }
+  .calendar-day-body, .calendar-times-body { position: relative; }
   .calendar-hour-label {
     position: absolute;
     left: 0;
@@ -63,13 +66,36 @@
       color-mix(in srgb, var(--block-color) 22%, var(--body-bg)) 10px
     );
   }
-  .calendar-block-teacher { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--body-fg); }
-  .calendar-block-time { color: var(--body-quiet-color); white-space: nowrap; }
-  .calendar-block.compact { padding: 2px; }
-  .calendar-block.compact .calendar-block-teacher,
-  .calendar-block.compact .calendar-block-time { display: none; }
+  .calendar-block-teacher,
+  .calendar-block-time { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .calendar-block-teacher { font-weight: 600; color: var(--body-fg); }
+  .calendar-block-time { color: var(--body-quiet-color); }
+  /* Too short for two lines: name and times share one row, the name keeping
+     whatever space is left over. */
+  .calendar-block.inline { display: flex; align-items: baseline; gap: 4px; padding: 1px 4px; font-size: .65rem; }
+  .calendar-block.inline .calendar-block-teacher { flex: 1 1 auto; min-width: 0; }
+  .calendar-block.inline .calendar-block-time { flex: none; }
+  /* Tall enough that a long name can wrap instead of being cut off. */
+  .calendar-block-teacher.wrap {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
   .calendar-legend { margin-top: .75rem; font-size: .8rem; color: var(--body-quiet-color); display: flex; align-items: center; gap: 1.5em; flex-wrap: wrap; }
+  .calendar-legend-teachers { gap: 1em; }
   .calendar-legend-swatch { display: inline-block; width: .9em; height: .9em; border-radius: 3px; vertical-align: -.15em; margin-right: .35em; }
+  .calendar-legend-swatch.paperwork {
+    background: repeating-linear-gradient(
+      45deg,
+      var(--body-quiet-color),
+      var(--body-quiet-color) 2px,
+      transparent 2px,
+      transparent 4px
+    );
+    box-shadow: inset 0 0 0 1px var(--hairline-color);
+  }
 </style>
 {% endblock %}
 
@@ -87,32 +113,50 @@
 <p>{% translate "No teacher has entered any non-teaching hours yet." %}</p>
 {% endif %}
 
+{% localize off %}
 <div class="calendar-wrap">
-  <div class="calendar-times" style="height: {{ calendar_height }}px;">
+  <div class="calendar-times">
     <div class="calendar-header">&nbsp;</div>
-    {% for hour in hours %}
-    <div class="calendar-hour-label" style="top: {{ hour.top }}%;">{{ hour.label }}</div>
-    {% endfor %}
+    <div class="calendar-times-body" style="height: {{ calendar_height }}px;">
+      {% for hour in hours %}
+      <div class="calendar-hour-label" style="top: {{ hour.top }}%;">{{ hour.label }}</div>
+      {% endfor %}
+    </div>
   </div>
   <div class="calendar-days">
     {% for day in days %}
-    <div class="calendar-day">
+    <div class="calendar-day" style="min-width: {{ day.min_width }}px;">
       <div class="calendar-header">{{ day.label }}</div>
       <div class="calendar-day-body" style="height: {{ calendar_height }}px;">
         {% for hour in hours %}
         <div class="calendar-gridline" style="top: {{ hour.top }}%;"></div>
         {% endfor %}
         {% for block in day.blocks %}
-        <div class="calendar-block{% if block.is_paperwork %} paperwork{% endif %}{% if block.compact %} compact{% endif %}"
+        <div class="calendar-block{% if block.is_paperwork %} paperwork{% endif %}{% if block.inline %} inline{% endif %}"
              style="top: {{ block.top }}%; height: {{ block.height }}%; left: {{ block.left }}%; width: {{ block.width }}%; --block-color: {{ block.color }};"
              title="{{ block.teacher_name }} ({{ block.start|time:'H:i' }}–{{ block.end|time:'H:i' }})">
-          <div class="calendar-block-teacher">{{ block.teacher_name }}</div>
-          <div class="calendar-block-time">{{ block.start|time:"H:i" }}–{{ block.end|time:"H:i" }}</div>
+          <span class="calendar-block-teacher{% if block.wrap %} wrap{% endif %}">{{ block.teacher_name }}</span>
+          {% if block.show_time %}
+          <span class="calendar-block-time">{{ block.start|time:"H:i" }}–{{ block.end|time:"H:i" }}</span>
+          {% endif %}
         </div>
         {% endfor %}
       </div>
     </div>
     {% endfor %}
   </div>
+</div>
+{% endlocalize %}
+
+{% if teacher_legend %}
+<div class="calendar-legend calendar-legend-teachers">
+  {% for teacher in teacher_legend %}
+  <span><span class="calendar-legend-swatch" style="background: {{ teacher.color }};"></span>{{ teacher.name }}</span>
+  {% endfor %}
+</div>
+{% endif %}
+
+<div class="calendar-legend">
+  <span><span class="calendar-legend-swatch paperwork"></span>{% translate "Reserved for paperwork" %}</span>
 </div>
 {% endblock %}
