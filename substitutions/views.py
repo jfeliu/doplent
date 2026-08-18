@@ -6,7 +6,7 @@ from teachers.models import Teacher
 
 from .forms import AbsenceForm
 from .models import Absence, Substitution
-from .services import build_coverage_plan, uncovered_ranges
+from .services import build_coverage_plan, discarded_periods, uncovered_ranges
 
 
 @login_required
@@ -67,5 +67,7 @@ def pick_substitute(request, absence_id):
             return redirect("pick_substitute", absence_id=absence.pk)
 
     return render(
-        request, "substitutions/pick_substitute.html", {"absence": absence, "slots": slots}
+        request,
+        "substitutions/pick_substitute.html",
+        {"absence": absence, "slots": slots, "discarded_periods": discarded_periods(absence)},
     )

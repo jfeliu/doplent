@@ -7,6 +7,13 @@ from teachers.models import Teacher
 
 from .models import Absence, Substitution
 
+# The school's daily working hours - substitutes are never searched for
+# outside these windows, regardless of any teacher's individual schedule.
+WORKING_HOURS: list[tuple[time, time]] = [
+    (time(9, 0), time(13, 0)),
+    (time(15, 0), time(17, 0)),
+]
+
 
 def _daily_segments(start_dt, end_dt) -> list[tuple[date, time, time]]:
     """Split [start_dt, end_dt) into one (date, start_time, end_time) segment per
@@ -41,6 +48,41 @@ def _merge_blocks(blocks: list[tuple[time, time]]) -> list[tuple[time, time]]:
     return merged
 
 
+def _subtract_intervals(range_start, range_end, remove: list[tuple[datetime, datetime]]) -> list[tuple[datetime, datetime]]:
+    """Return [range_start, range_end) minus the given (start, end) intervals,
+    which may be unsorted and/or overlapping."""
+    result = []
+    cursor = range_start
+    for r_start, r_end in sorted(remove):
+        if r_start > cursor:
+            result.append((cursor, min(r_start, range_end)))
+        cursor = max(cursor, r_end)
+        if cursor >= range_end:
+            break
+    if cursor < range_end:
+        result.append((cursor, range_end))
+    return result
+
+
+def _outside_working_hours(start_dt, end_dt) -> list[tuple[datetime, datetime]]:
+    """Datetime intervals within [start_dt, end_dt) that fall outside
+    WORKING_HOURS, one entry per day touched."""
+    intervals = []
+    for day, seg_start, seg_end in _daily_segments(start_dt, end_dt):
+        day_start = timezone.make_aware(datetime.combine(day, seg_start))
+        day_end = timezone.make_aware(datetime.combine(day, seg_end))
+        working_today = [
+            (
+                timezone.make_aware(datetime.combine(day, max(w_start, seg_start))),
+                timezone.make_aware(datetime.combine(day, min(w_end, seg_end))),
+            )
+            for w_start, w_end in WORKING_HOURS
+            if w_start < seg_end and w_end > seg_start
+        ]
+        intervals.extend(_subtract_intervals(day_start, day_end, working_today))
+    return intervals
+
+
 def _blocks_by_weekday(candidate: Teacher, only_non_paperwork: bool = False) -> dict[int, list[tuple[time, time]]]:
     blocks_by_weekday: dict[int, list[tuple[time, time]]] = {}
     for nth in candidate.non_teaching_hours.all():
@@ -72,11 +114,22 @@ def _has_nothing_to_do_during(candidate: Teacher, segments) -> bool:
     return _covers(_blocks_by_weekday(candidate, only_non_paperwork=True), segments)
 
 
+def _coverage_segments(absence: Absence, start_dt, end_dt) -> list[tuple[date, time, time]]:
+    """Segments within [start_dt, end_dt) that actually need a substitute -
+    excludes any time the absent teacher's own weekly non-teaching hours
+    already cover (no one needs to cover a class that wasn't happening
+    anyway), and any time outside the school's working hours."""
+    requester_free = _merged_intervals_for_range(absence.teacher, start_dt, end_dt)
+    non_working = _outside_working_hours(start_dt, end_dt)
+    needed_ranges = _subtract_intervals(start_dt, end_dt, requester_free + non_working)
+    return [segment for r_start, r_end in needed_ranges for segment in _daily_segments(r_start, r_end)]
+
+
 def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) -> list[Teacher]:
     """Same as `find_available_substitutes`, but scoped to an explicit
     [start_dt, end_dt) window instead of the absence's own range - used both
     for the absence as a whole and for each split-off period within it."""
-    segments = _daily_segments(start_dt, end_dt)
+    segments = _coverage_segments(absence, start_dt, end_dt)
 
     busy_with_own_absence = Absence.objects.filter(
         start_datetime__lt=end_dt, end_datetime__gt=start_dt
@@ -136,17 +189,54 @@ def find_available_substitutes(absence: Absence) -> list[Teacher]:
 def uncovered_ranges(absence: Absence) -> list[tuple[datetime, datetime]]:
     """Return the gaps in `absence`'s time range not yet covered by any
     confirmed Substitution, as a list of (start, end) datetime pairs in
-    chronological order. Empty once the absence is fully covered."""
-    covered = sorted((sub.start_datetime, sub.end_datetime) for sub in absence.substitutions.all())
+    chronological order. Time that falls within the absent teacher's own
+    non-teaching hours, or outside the school's working hours, is never a
+    gap - there's nothing to cover then. Empty once the absence is fully
+    covered."""
+    requester_free = _merged_intervals_for_range(absence.teacher, absence.start_datetime, absence.end_datetime)
+    non_working = _outside_working_hours(absence.start_datetime, absence.end_datetime)
+    needing_coverage = _subtract_intervals(
+        absence.start_datetime, absence.end_datetime, requester_free + non_working
+    )
+    covered = [(sub.start_datetime, sub.end_datetime) for sub in absence.substitutions.all()]
     gaps = []
-    cursor = absence.start_datetime
-    for start, end in covered:
-        if start > cursor:
-            gaps.append((cursor, start))
-        cursor = max(cursor, end)
-    if cursor < absence.end_datetime:
-        gaps.append((cursor, absence.end_datetime))
+    for need_start, need_end in needing_coverage:
+        gaps.extend(_subtract_intervals(need_start, need_end, covered))
     return gaps
+
+
+def discarded_periods(absence: Absence) -> list[dict]:
+    """Return the parts of `absence`'s reported range that need no substitute,
+    each as a dict with `start_datetime`, `end_datetime` and `reason` - either
+    "outside_working_hours" or "requester_free" - in chronological order.
+    When both apply to a stretch of time, "outside_working_hours" wins since
+    it's the more fundamental reason. Adjacent stretches with the same reason
+    are merged into one period."""
+    non_working = _outside_working_hours(absence.start_datetime, absence.end_datetime)
+    requester_free = _merged_intervals_for_range(absence.teacher, absence.start_datetime, absence.end_datetime)
+
+    boundaries = {absence.start_datetime, absence.end_datetime}
+    for start, end in non_working + requester_free:
+        if absence.start_datetime < start < absence.end_datetime:
+            boundaries.add(start)
+        if absence.start_datetime < end < absence.end_datetime:
+            boundaries.add(end)
+    boundaries = sorted(boundaries)
+
+    periods = []
+    for seg_start, seg_end in zip(boundaries, boundaries[1:]):
+        if any(start <= seg_start < end for start, end in non_working):
+            reason = "outside_working_hours"
+        elif any(start <= seg_start < end for start, end in requester_free):
+            reason = "requester_free"
+        else:
+            reason = None
+
+        if reason and periods and periods[-1]["reason"] == reason and periods[-1]["end_datetime"] == seg_start:
+            periods[-1]["end_datetime"] = seg_end
+        elif reason:
+            periods.append({"start_datetime": seg_start, "end_datetime": seg_end, "reason": reason})
+    return periods
 
 
 def _merged_intervals_for_range(candidate: Teacher, start_dt, end_dt) -> list[tuple[datetime, datetime]]:

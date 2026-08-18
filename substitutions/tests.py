@@ -8,7 +8,7 @@ from django.utils import timezone
 from teachers.models import Teacher, WeeklyNonTeachingHours
 
 from .models import Absence, Substitution
-from .services import build_coverage_plan, find_available_substitutes
+from .services import build_coverage_plan, discarded_periods, find_available_substitutes, uncovered_ranges
 
 
 def make_teacher(username, grade_level=Teacher.GradeLevel.PRIMARY, active=True):
@@ -46,7 +46,6 @@ def make_substitution(absence, substitute_teacher, start=None, end=None):
 class FindAvailableSubstitutesTests(TestCase):
     def setUp(self):
         self.absent = make_teacher("absent", grade_level=Teacher.GradeLevel.PRIMARY)
-        give_free_all_week(self.absent)
         # 2024-01-08 is a Monday.
         self.absence = Absence.objects.create(
             teacher=self.absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 11)
@@ -261,11 +260,42 @@ class FindAvailableSubstitutesTests(TestCase):
         self.assertIn(candidate, results)
         self.assertFalse(result_for(results, candidate).has_nothing_to_do)
 
+    def test_requester_own_non_teaching_block_excluded_from_coverage_need(self):
+        # The absent teacher has a personal free block 9:30-10 within the
+        # 9-11 absence; a substitute is only needed for 9-9:30 and 10-11, not
+        # for time the requester wasn't teaching anyway.
+        WeeklyNonTeachingHours.objects.create(
+            teacher=self.absent,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(9, 30),
+            end_time=datetime.time(10, 0),
+        )
+        candidate = make_teacher("covers_around_the_gap")
+        WeeklyNonTeachingHours.objects.create(
+            teacher=candidate,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(9, 30),
+        )
+        WeeklyNonTeachingHours.objects.create(
+            teacher=candidate,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(10, 0),
+            end_time=datetime.time(11, 0),
+        )
+
+        self.assertIn(candidate, find_available_substitutes(self.absence))
+
+    def test_requester_free_for_whole_absence_needs_no_substitute(self):
+        give_free_all_week(self.absent)
+
+        self.assertEqual(uncovered_ranges(self.absence), [])
+        self.assertEqual(find_available_substitutes(self.absence), [])
+
 
 class PickSubstituteViewTests(TestCase):
     def setUp(self):
         self.absent = make_teacher("absent_view", grade_level=Teacher.GradeLevel.PRIMARY)
-        give_free_all_week(self.absent)
         # 2024-01-08 is a Monday.
         self.absence = Absence.objects.create(
             teacher=self.absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 11)
@@ -298,7 +328,6 @@ class PickSubstituteViewTests(TestCase):
 class BuildCoveragePlanTests(TestCase):
     def setUp(self):
         self.absent = make_teacher("absent_split", grade_level=Teacher.GradeLevel.PRIMARY)
-        give_free_all_week(self.absent)
         # 2024-01-08 is a Monday, 9am-noon.
         self.absence = Absence.objects.create(
             teacher=self.absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 12)
@@ -375,6 +404,40 @@ class BuildCoveragePlanTests(TestCase):
 
         self.assertEqual(build_coverage_plan(self.absence), [])
 
+    def test_requester_own_free_block_splits_the_plan_around_it(self):
+        # self.absence is 9-noon Monday. The absent teacher has a personal
+        # free block 10:30-11, so only 9-10:30 and 11-noon actually need a
+        # substitute.
+        WeeklyNonTeachingHours.objects.create(
+            teacher=self.absent,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(10, 30),
+            end_time=datetime.time(11, 0),
+        )
+        candidate = make_teacher("covers_both_pieces")
+        WeeklyNonTeachingHours.objects.create(
+            teacher=candidate,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(10, 30),
+        )
+        WeeklyNonTeachingHours.objects.create(
+            teacher=candidate,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(11, 0),
+            end_time=datetime.time(12, 0),
+        )
+
+        slots = build_coverage_plan(self.absence)
+
+        self.assertEqual(len(slots), 2)
+        self.assertEqual(slots[0]["start_datetime"], self.absence.start_datetime)
+        self.assertEqual(slots[0]["end_datetime"], dt(2024, 1, 8, 10, 30))
+        self.assertEqual(slots[1]["start_datetime"], dt(2024, 1, 8, 11, 0))
+        self.assertEqual(slots[1]["end_datetime"], self.absence.end_datetime)
+        self.assertIn(candidate, slots[0]["candidates"])
+        self.assertIn(candidate, slots[1]["candidates"])
+
     def test_partially_covered_absence_only_plans_the_remaining_gap(self):
         first_half = make_teacher("first_half_confirmed")
         give_free_all_week(first_half)
@@ -396,10 +459,160 @@ class BuildCoveragePlanTests(TestCase):
         self.assertIn(second_half, slots[0]["candidates"])
 
 
+class WorkingHoursTests(TestCase):
+    """Substitutes are never searched for outside the school's working hours
+    (9-13, 15-17), regardless of any teacher's individual schedule."""
+
+    def setUp(self):
+        self.absent = make_teacher("absent_hours", grade_level=Teacher.GradeLevel.PRIMARY)
+
+    def test_absence_entirely_outside_working_hours_needs_no_substitute(self):
+        # 2024-01-08 is a Monday; 7-8am is before the 9am opening.
+        absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=dt(2024, 1, 8, 7), end_datetime=dt(2024, 1, 8, 8)
+        )
+
+        self.assertEqual(uncovered_ranges(absence), [])
+        self.assertEqual(find_available_substitutes(absence), [])
+
+    def test_absence_spanning_lunch_break_splits_around_it(self):
+        # Noon to 3:30pm spans the 1-3pm non-working break.
+        absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=dt(2024, 1, 8, 12), end_datetime=dt(2024, 1, 8, 15, 30)
+        )
+        candidate = make_teacher("covers_around_lunch")
+        WeeklyNonTeachingHours.objects.create(
+            teacher=candidate,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(12, 0),
+            end_time=datetime.time(13, 0),
+        )
+        WeeklyNonTeachingHours.objects.create(
+            teacher=candidate,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(15, 0),
+            end_time=datetime.time(15, 30),
+        )
+
+        self.assertEqual(
+            uncovered_ranges(absence),
+            [(dt(2024, 1, 8, 12), dt(2024, 1, 8, 13)), (dt(2024, 1, 8, 15), dt(2024, 1, 8, 15, 30))],
+        )
+        self.assertIn(candidate, find_available_substitutes(absence))
+
+    def test_absence_trimmed_to_closing_time(self):
+        # 4:30pm to 6pm - only 4:30-5pm falls within working hours.
+        absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=dt(2024, 1, 8, 16, 30), end_datetime=dt(2024, 1, 8, 18)
+        )
+
+        self.assertEqual(uncovered_ranges(absence), [(dt(2024, 1, 8, 16, 30), dt(2024, 1, 8, 17))])
+
+
+class DiscardedPeriodsTests(TestCase):
+    def setUp(self):
+        self.absent = make_teacher("absent_discarded", grade_level=Teacher.GradeLevel.PRIMARY)
+
+    def test_outside_working_hours_reported(self):
+        # 2024-01-08 is a Monday, 7-8am is before the 9am opening.
+        absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=dt(2024, 1, 8, 7), end_datetime=dt(2024, 1, 8, 8)
+        )
+
+        self.assertEqual(
+            discarded_periods(absence),
+            [{"start_datetime": dt(2024, 1, 8, 7), "end_datetime": dt(2024, 1, 8, 8), "reason": "outside_working_hours"}],
+        )
+
+    def test_requester_free_time_reported(self):
+        WeeklyNonTeachingHours.objects.create(
+            teacher=self.absent,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(9, 30),
+            end_time=datetime.time(10, 0),
+        )
+        absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 11)
+        )
+
+        self.assertEqual(
+            discarded_periods(absence),
+            [{
+                "start_datetime": dt(2024, 1, 8, 9, 30),
+                "end_datetime": dt(2024, 1, 8, 10),
+                "reason": "requester_free",
+            }],
+        )
+
+    def test_both_reasons_reported_in_order_outside_hours_wins_when_overlapping(self):
+        # Absent 12-15:30 (spans the 1-3pm break) and personally free 12-12:30
+        # within working hours.
+        WeeklyNonTeachingHours.objects.create(
+            teacher=self.absent,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(12, 0),
+            end_time=datetime.time(12, 30),
+        )
+        absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=dt(2024, 1, 8, 12), end_datetime=dt(2024, 1, 8, 15, 30)
+        )
+
+        self.assertEqual(
+            discarded_periods(absence),
+            [
+                {"start_datetime": dt(2024, 1, 8, 12), "end_datetime": dt(2024, 1, 8, 12, 30), "reason": "requester_free"},
+                {"start_datetime": dt(2024, 1, 8, 13), "end_datetime": dt(2024, 1, 8, 15), "reason": "outside_working_hours"},
+            ],
+        )
+
+    def test_no_discarded_periods_when_absence_fully_within_working_hours(self):
+        absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 11)
+        )
+
+        self.assertEqual(discarded_periods(absence), [])
+
+
+class PickSubstituteViewDiscardedPeriodsTests(TestCase):
+    def test_page_shows_discarded_periods_with_reasons(self):
+        absent = make_teacher("absent_page_discard", grade_level=Teacher.GradeLevel.PRIMARY)
+        WeeklyNonTeachingHours.objects.create(
+            teacher=absent,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(9, 30),
+            end_time=datetime.time(10, 0),
+        )
+        candidate = make_teacher("covers_page_discard")
+        WeeklyNonTeachingHours.objects.create(
+            teacher=candidate,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(9, 30),
+        )
+        WeeklyNonTeachingHours.objects.create(
+            teacher=candidate,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(10, 0),
+            end_time=datetime.time(18, 0),
+        )
+        # 2024-01-08 is a Monday.
+        absence = Absence.objects.create(
+            teacher=absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 18)
+        )
+        self.client.force_login(absent.user)
+
+        response = self.client.get(reverse("pick_substitute", args=[absence.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Periods that don't need a substitute")
+        self.assertContains(response, "Outside school hours")
+        self.assertContains(response, "Requester's own non-working hours")
+        self.assertContains(response, "Covering")
+
+
 class SplitPickSubstituteViewTests(TestCase):
     def setUp(self):
         self.absent = make_teacher("absent_split_view", grade_level=Teacher.GradeLevel.PRIMARY)
-        give_free_all_week(self.absent)
         # 2024-01-08 is a Monday, 9am-noon.
         self.absence = Absence.objects.create(
             teacher=self.absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 12)
