@@ -1,0 +1,43 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+{% block content %}
+{% if result.errors %}
+  <ul class="messagelist">
+    <li class="error">{% translate "Import failed - no changes were saved. Fix the errors below and re-upload." %}</li>
+  </ul>
+  <ul>
+    {% for error in result.errors %}
+    <li>{% blocktranslate with line=error.line_number message=error.message %}Line {{ line }}: {{ message }}{% endblocktranslate %}</li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <ul class="messagelist">
+    <li class="success">{% translate "Import successful." %}</li>
+  </ul>
+  <p>
+    {% blocktranslate count counter=result.teachers_touched|length %}
+      {{ counter }} teacher processed.
+    {% plural %}
+      {{ counter }} teachers processed.
+    {% endblocktranslate %}
+    {% blocktranslate count counter=result.hours_created %}
+      {{ counter }} non-teaching hour block added.
+    {% plural %}
+      {{ counter }} non-teaching hour blocks added.
+    {% endblocktranslate %}
+  </p>
+  {% if result.created_users %}
+  <h2>{% translate "New accounts created" %}</h2>
+  <p>{% translate "Share these one-time passwords with each teacher - they won't be shown again." %}</p>
+  <table>
+    <thead><tr><th>{% translate "Username" %}</th><th>{% translate "Temporary password" %}</th></tr></thead>
+    <tbody>
+      {% for username, password in result.created_users %}
+      <tr><td>{{ username }}</td><td><code>{{ password }}</code></td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  {% endif %}
+{% endif %}
+<p><a href="{% url 'admin:teachers_teacher_changelist' %}">{% translate "Back to teacher list" %}</a></p>
+{% endblock %}

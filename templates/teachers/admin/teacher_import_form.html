@@ -1,0 +1,20 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+{% block content %}
+<p>
+  {% blocktranslate %}
+  Upload a CSV of teachers and their weekly non-teaching hours. One row per
+  non-teaching block - repeat a teacher's first and last name across rows to
+  give them several blocks, or leave weekday/start_time/end_time blank to add
+  a teacher with no hours yet. Usernames are generated automatically from each
+  teacher's name. Re-uploading the same file is safe. If any row is invalid,
+  nothing is saved.
+  {% endblocktranslate %}
+</p>
+<p><a href="{% url 'admin:teachers_teacher_import_csv_template' %}">{% translate "Download CSV template" %}</a></p>
+<form method="post" enctype="multipart/form-data">
+  {% csrf_token %}
+  {{ form.as_p }}
+  <input type="submit" value="{% translate 'Import' %}" class="default">
+</form>
+{% endblock %}

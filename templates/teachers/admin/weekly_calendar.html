@@ -1,0 +1,118 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .calendar-intro { color: var(--body-quiet-color); max-width: 60em; }
+  .calendar-wrap {
+    display: flex;
+    border: 1px solid var(--hairline-color);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--body-bg);
+  }
+  .calendar-times { width: 56px; flex: none; position: relative; border-right: 1px solid var(--hairline-color); }
+  .calendar-days { display: flex; flex: 1; min-width: 0; }
+  .calendar-day { flex: 1; min-width: 0; border-right: 1px solid var(--hairline-color); }
+  .calendar-day:last-child { border-right: none; }
+  .calendar-header {
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: .75rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    border-bottom: 1px solid var(--hairline-color);
+    background: var(--darkened-bg);
+    color: var(--body-quiet-color);
+  }
+  .calendar-day-body, .calendar-times { position: relative; }
+  .calendar-hour-label {
+    position: absolute;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    font-size: .7rem;
+    color: var(--body-quiet-color);
+    text-align: right;
+    padding-right: 6px;
+  }
+  .calendar-gridline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--hairline-color); }
+  .calendar-block {
+    position: absolute;
+    box-sizing: border-box;
+    padding: 2px 5px;
+    margin: 0 1px;
+    border-radius: 4px;
+    background: color-mix(in srgb, var(--block-color) 20%, var(--body-bg));
+    border-left: 3px solid var(--block-color);
+    overflow: hidden;
+    font-size: .7rem;
+    line-height: 1.25;
+  }
+  .calendar-block.paperwork {
+    border-left-style: dashed;
+    background: repeating-linear-gradient(
+      45deg,
+      color-mix(in srgb, var(--block-color) 14%, var(--body-bg)),
+      color-mix(in srgb, var(--block-color) 14%, var(--body-bg)) 5px,
+      color-mix(in srgb, var(--block-color) 22%, var(--body-bg)) 5px,
+      color-mix(in srgb, var(--block-color) 22%, var(--body-bg)) 10px
+    );
+  }
+  .calendar-block-teacher { font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; color: var(--body-fg); }
+  .calendar-block-time { color: var(--body-quiet-color); white-space: nowrap; }
+  .calendar-block.compact { padding: 2px; }
+  .calendar-block.compact .calendar-block-teacher,
+  .calendar-block.compact .calendar-block-time { display: none; }
+  .calendar-legend { margin-top: .75rem; font-size: .8rem; color: var(--body-quiet-color); display: flex; align-items: center; gap: 1.5em; flex-wrap: wrap; }
+  .calendar-legend-swatch { display: inline-block; width: .9em; height: .9em; border-radius: 3px; vertical-align: -.15em; margin-right: .35em; }
+</style>
+{% endblock %}
+
+{% block content %}
+<p class="calendar-intro">
+  {% blocktranslate %}
+  Every active teacher's recurring free periods, across the school week.
+  Each block is a period when that teacher is at school but not teaching -
+  the pool substitutions are drawn from. Striped blocks are reserved for
+  paperwork.
+  {% endblocktranslate %}
+</p>
+
+{% if not has_entries %}
+<p>{% translate "No teacher has entered any non-teaching hours yet." %}</p>
+{% endif %}
+
+<div class="calendar-wrap">
+  <div class="calendar-times" style="height: {{ calendar_height }}px;">
+    <div class="calendar-header">&nbsp;</div>
+    {% for hour in hours %}
+    <div class="calendar-hour-label" style="top: {{ hour.top }}%;">{{ hour.label }}</div>
+    {% endfor %}
+  </div>
+  <div class="calendar-days">
+    {% for day in days %}
+    <div class="calendar-day">
+      <div class="calendar-header">{{ day.label }}</div>
+      <div class="calendar-day-body" style="height: {{ calendar_height }}px;">
+        {% for hour in hours %}
+        <div class="calendar-gridline" style="top: {{ hour.top }}%;"></div>
+        {% endfor %}
+        {% for block in day.blocks %}
+        <div class="calendar-block{% if block.is_paperwork %} paperwork{% endif %}{% if block.compact %} compact{% endif %}"
+             style="top: {{ block.top }}%; height: {{ block.height }}%; left: {{ block.left }}%; width: {{ block.width }}%; --block-color: {{ block.color }};"
+             title="{{ block.teacher_name }} ({{ block.start|time:'H:i' }}–{{ block.end|time:'H:i' }})">
+          <div class="calendar-block-teacher">{{ block.teacher_name }}</div>
+          <div class="calendar-block-time">{{ block.start|time:"H:i" }}–{{ block.end|time:"H:i" }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endblock %}

@@ -1,0 +1,5 @@
+first_name,last_name,email,grade_level,weekday,start_time,end_time,is_paperwork
+Jane,Doe,jane.doe@example.edu,primary,Monday,08:00,09:30,no
+Jane,Doe,jane.doe@example.edu,primary,Monday,13:00,16:00,yes
+Jane,Doe,jane.doe@example.edu,primary,Wednesday,08:00,12:00,no
+John,Smith,john.smith@example.edu,pre_primary,Tuesday,09:00,10:00,no

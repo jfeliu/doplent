@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% translate "Dashboard" %}{% endblock %}
+{% block content %}
+<div class="mb-4">
+  <h1 class="h3 mb-1">{% blocktranslate %}Welcome, {{ teacher }}{% endblocktranslate %}</h1>
+  <p class="text-muted mb-0">{{ teacher.get_grade_level_display }}</p>
+</div>
+
+<div class="row g-4">
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-calendar-x text-primary"></i>{% translate "My absences" %}</div>
+      {% if my_absences %}
+      <ul class="list-group list-group-flush">
+        {% for absence in my_absences %}
+        <li class="list-group-item py-3">
+          <div class="fw-semibold"><i class="bi bi-clock-history text-muted me-1"></i>{{ absence.start_datetime }} &ndash; {{ absence.end_datetime }}</div>
+          {% if absence.reason %}<div class="text-muted small mt-1">{{ absence.reason }}</div>{% endif %}
+          {% if absence.substitutions.all %}
+            <div class="small mt-2 d-flex flex-column align-items-start gap-1">
+              {% for sub in absence.substitutions.all %}
+              <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-check-circle-fill"></i>
+              {% blocktranslate with substitute=sub.substitute_teacher start=sub.start_datetime end=sub.end_datetime %}{{ substitute }} ({{ start }} &ndash; {{ end }}){% endblocktranslate %}</span>
+              {% endfor %}
+            </div>
+          {% endif %}
+          {% if not absence.is_fully_covered %}
+            <div class="small mt-2 d-flex align-items-center gap-2">
+              <span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-exclamation-triangle-fill"></i> {% translate "Not fully covered yet" %}</span>
+              <a href="{% url 'pick_substitute' absence.id %}">{% translate "choose a substitute" %}</a>
+            </div>
+          {% endif %}
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="card-body">
+        <div class="empty-state">
+          <i class="bi bi-calendar-check"></i>
+          {% translate "No absences reported yet." %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header"><i class="bi bi-people text-primary"></i>{% translate "Substitutions I'm covering" %}</div>
+      {% if covering %}
+      <ul class="list-group list-group-flush">
+        {% for sub in covering %}
+        <li class="list-group-item py-3">
+          <div class="fw-semibold">{{ sub.absence.teacher }}</div>
+          <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ sub.start_datetime }} &ndash; {{ sub.end_datetime }}</div>
+        </li>
+        {% endfor %}
+      </ul>
+      {% else %}
+      <div class="card-body">
+        <div class="empty-state">
+          <i class="bi bi-emoji-smile"></i>
+          {% translate "None yet." %}
+        </div>
+      </div>
+      {% endif %}
+    </div>
+  </div>
+</div>
+{% endblock %}

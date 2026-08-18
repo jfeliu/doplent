@@ -1,0 +1,378 @@
+# Catalan translations for the substi-fedac substitution management app.
+msgid ""
+msgstr ""
+"Project-Id-Version: substi-fedac\n"
+"Report-Msgid-Bugs-To: \n"
+"POT-Creation-Date: 2026-08-13 12:16+0000\n"
+"PO-Revision-Date: 2026-08-13 12:16+0000\n"
+"Last-Translator: \n"
+"Language-Team: Catalan\n"
+"Language: ca\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+msgid "End must be after start."
+msgstr "La data de fi ha de ser posterior a la d'inici."
+
+msgid "unavailable from"
+msgstr "no disponible des de"
+
+msgid "unavailable until"
+msgstr "no disponible fins a"
+
+msgid "reason"
+msgstr "motiu"
+
+msgid "created at"
+msgstr "creat el"
+
+msgid "absence"
+msgstr "absència"
+
+msgid "absences"
+msgstr "absències"
+
+msgid "confirmed at"
+msgstr "confirmat el"
+
+msgid "substitution"
+msgstr "substitució"
+
+msgid "substitutions"
+msgstr "substitucions"
+
+msgid "End time must be after start time."
+msgstr "L'hora de fi ha de ser posterior a la d'inici."
+
+msgid "CSV file"
+msgstr "Fitxer CSV"
+
+#, python-format
+msgid "unrecognized weekday '%(value)s'"
+msgstr "dia de la setmana no reconegut '%(value)s'"
+
+#, python-format
+msgid "unrecognized time '%(value)s', expected HH:MM"
+msgstr "hora no reconeguda '%(value)s', s'esperava HH:MM"
+
+#, python-format
+msgid "unrecognized is_paperwork value '%(value)s', expected yes/no"
+msgstr "valor d'is_paperwork no reconegut '%(value)s', s'esperava yes/no"
+
+msgid "username is required"
+msgstr "el nom d'usuari és obligatori"
+
+msgid "first_name and last_name are required"
+msgstr "el nom i els cognoms són obligatoris"
+
+#, python-format
+msgid "grade_level must be one of %(choices)s"
+msgstr "grade_level ha de ser un d'aquests: %(choices)s"
+
+#, python-format
+msgid ""
+"grade_level '%(grade)s' for %(username)s conflicts with existing grade_level "
+"'%(existing)s'"
+msgstr ""
+"el grade_level '%(grade)s' de %(username)s entra en conflicte amb el "
+"grade_level existent '%(existing)s'"
+
+msgid "end_time must be after start_time"
+msgstr "end_time ha de ser posterior a start_time"
+
+#, python-format
+msgid ""
+"is_paperwork for %(username)s's %(start)s-%(end)s block conflicts with the "
+"existing value"
+msgstr ""
+"is_paperwork del bloc %(start)s-%(end)s de %(username)s entra en conflicte "
+"amb el valor existent"
+
+#, python-format
+msgid "CSV must include columns: %(columns)s"
+msgstr "El CSV ha d'incloure les columnes: %(columns)s"
+
+msgid "Primary"
+msgstr "Primària"
+
+msgid "Pre-primary"
+msgstr "Infantil"
+
+msgid "grade level"
+msgstr "etapa educativa"
+
+msgid "active"
+msgstr "actiu"
+
+msgid "teacher"
+msgstr "docent"
+
+msgid "teachers"
+msgstr "docents"
+
+msgid "Monday"
+msgstr "dilluns"
+
+msgid "Tuesday"
+msgstr "dimarts"
+
+msgid "Wednesday"
+msgstr "dimecres"
+
+msgid "Thursday"
+msgstr "dijous"
+
+msgid "Friday"
+msgstr "divendres"
+
+msgid "Saturday"
+msgstr "dissabte"
+
+msgid "Sunday"
+msgstr "diumenge"
+
+msgid "weekday"
+msgstr "dia de la setmana"
+
+msgid "start time"
+msgstr "hora d'inici"
+
+msgid "end time"
+msgstr "hora de fi"
+
+msgid "paperwork"
+msgstr "paperassa"
+
+msgid "Reserved for paperwork/admin work, as opposed to fully free time."
+msgstr "Reservat per a tasques administratives, en lloc de temps totalment lliure."
+
+msgid "weekly non-teaching hours"
+msgstr "hores setmanals sense docència"
+
+msgid "Substitutions"
+msgstr "Substitucions"
+
+msgid "Dashboard"
+msgstr "Tauler"
+
+msgid "Report absence"
+msgstr "Notifica una absència"
+
+msgid "My schedule"
+msgstr "El meu horari"
+
+msgid "Log out"
+msgstr "Tanca la sessió"
+
+msgid "Log in"
+msgstr "Inicia la sessió"
+
+#, python-format
+msgid "Welcome, %(teacher)s"
+msgstr "Benvingut/da, %(teacher)s"
+
+msgid "My absences"
+msgstr "Les meves absències"
+
+#, python-format
+msgid "Covered by %(substitute)s"
+msgstr "Cobert per %(substitute)s"
+
+msgid "No substitute picked yet"
+msgstr "Encara no s'ha triat cap substitut/a"
+
+msgid "choose one"
+msgstr "tria'n un"
+
+msgid "No absences reported yet."
+msgstr "Encara no s'ha notificat cap absència."
+
+msgid "Substitutions I'm covering"
+msgstr "Substitucions que estic cobrint"
+
+msgid "None yet."
+msgstr "Cap encara."
+
+msgid "Pick a substitute"
+msgstr "Tria un substitut/a"
+
+msgid "Free"
+msgstr "Lliure"
+
+msgid "Has paperwork time"
+msgstr "Té càrrec"
+
+#, python-format
+msgid ""
+"\n"
+"          %(counter)s substitution done\n"
+"        "
+msgid_plural ""
+"\n"
+"          %(counter)s substitutions done\n"
+"        "
+msgstr[0] ""
+"\n"
+"          %(counter)s substitució feta\n"
+"        "
+msgstr[1] ""
+"\n"
+"          %(counter)s substitucions fetes\n"
+"        "
+
+msgid "Choose"
+msgstr "Tria"
+
+msgid "No eligible substitute is available for this time frame."
+msgstr "No hi ha cap substitut/a disponible per a aquest interval horari."
+
+msgid "Report a time frame you can't work"
+msgstr "Notifica un interval horari en què no pots treballar"
+
+msgid "Find substitutes"
+msgstr "Cerca substituts"
+
+msgid "Import teachers from CSV"
+msgstr "Importa docents des d'un CSV"
+
+msgid ""
+"\n"
+"  Upload a CSV of teachers and their weekly non-teaching hours. One row per\n"
+"  non-teaching block - repeat a username across rows to give a teacher "
+"several\n"
+"  blocks, or leave weekday/start_time/end_time blank to add a teacher with "
+"no\n"
+"  hours yet. Re-uploading the same file is safe. If any row is invalid, "
+"nothing\n"
+"  is saved.\n"
+"  "
+msgstr ""
+"\n"
+"  Puja un fitxer CSV amb els docents i les seves hores setmanals sense "
+"docència. Una fila per cada bloc d'hores sense docència - repeteix el nom "
+"d'usuari en diverses files per donar diversos blocs a un mateix docent, o "
+"deixa weekday/start_time/end_time en blanc per afegir un docent sense hores "
+"encara. Tornar a pujar el mateix fitxer és segur. Si alguna fila no és "
+"vàlida, no es desa res.\n"
+"  "
+
+msgid "Download CSV template"
+msgstr "Descarrega la plantilla CSV"
+
+msgid "Import"
+msgstr "Importa"
+
+msgid ""
+"Import failed - no changes were saved. Fix the errors below and re-upload."
+msgstr ""
+"La importació ha fallat: no s'ha desat cap canvi. Corregeix els errors "
+"següents i torna-ho a pujar."
+
+#, python-format
+msgid "Line %(line)s: %(message)s"
+msgstr "Línia %(line)s: %(message)s"
+
+msgid "Import successful."
+msgstr "Importació correcta."
+
+#, python-format
+msgid ""
+"\n"
+"      %(counter)s teacher processed.\n"
+"    "
+msgid_plural ""
+"\n"
+"      %(counter)s teachers processed.\n"
+"    "
+msgstr[0] ""
+"\n"
+"      %(counter)s docent processat.\n"
+"    "
+msgstr[1] ""
+"\n"
+"      %(counter)s docents processats.\n"
+"    "
+
+#, python-format
+msgid ""
+"\n"
+"      %(counter)s non-teaching hour block added.\n"
+"    "
+msgid_plural ""
+"\n"
+"      %(counter)s non-teaching hour blocks added.\n"
+"    "
+msgstr[0] ""
+"\n"
+"      %(counter)s bloc d'hores sense docència afegit.\n"
+"    "
+msgstr[1] ""
+"\n"
+"      %(counter)s blocs d'hores sense docència afegits.\n"
+"    "
+
+msgid "New accounts created"
+msgstr "Comptes nous creats"
+
+msgid ""
+"Share these one-time passwords with each teacher - they won't be shown again."
+msgstr ""
+"Comparteix aquestes contrasenyes d'un sol ús amb cada docent: no es "
+"tornaran a mostrar."
+
+msgid "Username"
+msgstr "Nom d'usuari"
+
+msgid "Temporary password"
+msgstr "Contrasenya temporal"
+
+msgid "Back to teacher list"
+msgstr "Torna a la llista de docents"
+
+msgid "My non-teaching hours"
+msgstr "Les meves hores sense docència"
+
+msgid "My weekly non-teaching hours"
+msgstr "Les meves hores setmanals sense docència"
+
+msgid ""
+"\n"
+"  List the recurring times each week when you're at school but not teaching "
+"a class\n"
+"  (free periods). Those are the only times you can be suggested as a "
+"substitute.\n"
+"  Check \"Paperwork\" for blocks reserved for admin work - you'll still be\n"
+"  suggested during those, but only after teachers who have nothing else to "
+"do.\n"
+"  Leave a row's day blank and it will be ignored; check \"Delete\" to remove "
+"a row.\n"
+"  "
+msgstr ""
+"\n"
+"  Indica les hores recurrents de cada setmana en què ets al centre però no "
+"fas classe (hores lliures). Només en aquestes hores se't pot proposar com a "
+"substitut/a. Marca \"Paperassa\" en els blocs reservats per a tasques "
+"administratives - encara se't podrà proposar en aquests blocs, però només "
+"després dels docents que no tenen res més a fer. Deixa el dia d'una fila en "
+"blanc perquè s'ignori; marca \"Elimina\" per suprimir una fila.\n"
+"  "
+
+msgid "Day"
+msgstr "Dia"
+
+msgid "Free from"
+msgstr "Lliure des de"
+
+msgid "Free until"
+msgstr "Lliure fins a"
+
+msgid "Paperwork"
+msgstr "Paperassa"
+
+msgid "Delete"
+msgstr "Elimina"
+
+msgid "Save"
+msgstr "Desa"

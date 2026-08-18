@@ -1,0 +1,44 @@
+{% extends "admin/base_site.html" %}
+{% load i18n %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+<style>
+  :root, html[data-theme="light"] {
+    --primary: #4f46e5;
+    --secondary: #3730a3;
+    --accent: #c7d2fe;
+    --primary-fg: #fff;
+
+    --header-color: #eef0ff;
+    --header-branding-color: var(--accent);
+    --header-bg: var(--secondary);
+    --header-link-color: var(--primary-fg);
+
+    --link-fg: #4f46e5;
+    --link-hover-color: #3730a3;
+    --link-selected-fg: var(--secondary);
+
+    --button-bg: var(--primary);
+    --button-hover-bg: #4338ca;
+    --default-button-bg: #3730a3;
+    --default-button-hover-bg: var(--primary);
+
+    --font-family-primary: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  }
+  #site-name a { display: flex; align-items: center; gap: .5rem; }
+</style>
+{% endblock %}
+
+{% block branding %}
+<div id="site-name">
+  <a href="{% url 'admin:index' %}"><i class="bi bi-calendar2-check"></i>{{ site_header|default:_('Django administration') }}</a>
+</div>
+{% if user.is_anonymous %}
+  {% include "admin/color_theme_toggle.html" %}
+{% endif %}
+{% endblock %}
