@@ -54,6 +54,11 @@
                 {% if candidate.already_substituting %}
                   <span class="badge bg-danger-subtle text-danger-emphasis ms-1"><i class="bi bi-slash-circle-fill"></i> {% translate "Already covering another absence" %}</span>
                 {% endif %}
+                {% if candidate.offer.status == "pending" %}
+                  <span class="badge bg-info-subtle text-info-emphasis ms-1"><i class="bi bi-hourglass-split"></i> {% translate "Awaiting response" %}</span>
+                {% elif candidate.offer.status == "declined" %}
+                  <span class="badge bg-secondary-subtle text-secondary-emphasis ms-1"><i class="bi bi-x-circle"></i> {% translate "Previously declined" %}</span>
+                {% endif %}
               </div>
               <div class="text-muted small">{{ candidate.get_grade_level_display }}</div>
               <div class="text-muted small">
@@ -65,14 +70,16 @@
               </div>
             </div>
             {% if candidate.already_substituting %}
-            <button type="button" class="btn btn-sm btn-outline-secondary" disabled>{% translate "Choose" %}</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled>{% translate "Offer" %}</button>
+            {% elif candidate.offer.status == "pending" %}
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled>{% translate "Offer sent" %}</button>
             {% else %}
             <form method="post">
               {% csrf_token %}
               <input type="hidden" name="slot_start" value="{{ slot.start_datetime.isoformat }}">
               <input type="hidden" name="slot_end" value="{{ slot.end_datetime.isoformat }}">
               <input type="hidden" name="substitute_id" value="{{ candidate.pk }}">
-              <button type="submit" class="btn btn-sm btn-primary">{% translate "Choose" %}</button>
+              <button type="submit" class="btn btn-sm btn-primary">{% translate "Offer" %}</button>
             </form>
             {% endif %}
           </li>

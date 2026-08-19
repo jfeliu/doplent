@@ -1,0 +1,5 @@
+{% load i18n %}{% blocktranslate with teacher=offer.absence.teacher start=offer.start_datetime end=offer.end_datetime %}{{ teacher }} needs a substitute from {{ start }} to {{ end }}.{% endblocktranslate %}
+{% if offer.absence.reason %}
+{% blocktranslate with reason=offer.absence.reason %}Reason: {{ reason }}{% endblocktranslate %}
+{% endif %}
+{% translate "Respond here:" %} {{ url }}

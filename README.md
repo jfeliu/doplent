@@ -1,4 +1,4 @@
-# Substitutions
+# Doplent
 
 A small Django app that helps a school cover teacher absences. A teacher reports
 when they'll be away, and the app proposes colleagues who are genuinely free
@@ -18,6 +18,16 @@ Catalan.
   need a single substitution, but when no one person is free for the whole
   window the app splits it into the fewest sub-periods that *can* each be
   covered, so several teachers together fill the gap.
+- **Substitution offers** gate the above on the candidate's consent: picking a
+  candidate on the substitute-picking page sends them a pending offer (and an
+  email) rather than booking them outright. They accept or reject it from
+  their dashboard or the emailed link; only accepting creates the confirmed
+  `Substitution`. Several candidates can be offered the same slot in
+  parallel — first acceptance wins, the rest auto-expire. See
+  [substitutions/offers.py](substitutions/offers.py) for the lifecycle and
+  [substitutions/emails.py](substitutions/emails.py) for notifications (the
+  acceptance email attaches a plain `.ics` file so the confirmed slot lands on
+  the substitute's calendar, with no calendar-provider integration involved).
 
 Not every minute of a reported absence needs covering. The school only runs
 09:00–13:00 and 15:00–17:00 (`WORKING_HOURS` in
@@ -46,7 +56,7 @@ then ordered by:
 | --- | --- |
 | [config/](config/) | Django project settings, root URLconf, WSGI/ASGI entry points |
 | [teachers/](teachers/) | `Teacher` and `WeeklyNonTeachingHours` models, schedule editor, CSV importer, admin week-calendar |
-| [substitutions/](substitutions/) | `Absence` and `Substitution` models, dashboard, absence reporting, substitute picking, matching logic |
+| [substitutions/](substitutions/) | `Absence`, `Substitution` and `SubstitutionOffer` models, dashboard, absence reporting, substitute picking, offer accept/reject, matching logic, email notifications |
 | [templates/](templates/) | Project-level templates, including the admin overrides |
 | [locale/ca/](locale/ca/LC_MESSAGES/) | Catalan translations |
 
@@ -116,6 +126,14 @@ these in your environment or process manager:
 | `DJANGO_SECRET_KEY` | insecure placeholder | Set to a random value in production |
 | `DJANGO_DEBUG` | `True` | Set to `False` outside local dev |
 | `DJANGO_ALLOWED_HOSTS` | LAN IPs + localhost | Comma-separated hostnames |
+| `DJANGO_EMAIL_BACKEND` | console backend | Prints emails to stdout; set to the SMTP backend for real delivery |
+| `DJANGO_EMAIL_HOST` / `_PORT` / `_HOST_USER` / `_HOST_PASSWORD` / `_USE_TLS` | `localhost` / `25` / empty / empty / `False` | Only used by the SMTP backend |
+| `DJANGO_DEFAULT_FROM_EMAIL` | `webmaster@localhost` | From-address for substitution-offer notifications |
+| `DJANGO_EMAIL_TIMEOUT` | `10` (seconds) | Bounds how long a send can block the request - emails are sent synchronously, no task queue |
+
+A teacher with no email address on file (blank `user.email`) is silently
+skipped when notifications are sent — offers/confirmations still work
+in-app, they just don't get emailed.
 
 ## Translations
 

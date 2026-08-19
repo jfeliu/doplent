@@ -1,18 +1,19 @@
 import datetime
 
 from django.contrib.auth.models import User
+from django.core import mail
 from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
 from teachers.models import Teacher, WeeklyNonTeachingHours
 
-from .models import Absence, Substitution
+from .models import Absence, Substitution, SubstitutionOffer
 from .services import build_coverage_plan, discarded_periods, find_available_substitutes, uncovered_ranges
 
 
-def make_teacher(username, grade_level=Teacher.GradeLevel.PRIMARY, active=True):
-    user = User.objects.create_user(username=username, password="pw", first_name=username)
+def make_teacher(username, grade_level=Teacher.GradeLevel.PRIMARY, active=True, email=""):
+    user = User.objects.create_user(username=username, password="pw", first_name=username, email=email)
     return Teacher.objects.create(user=user, grade_level=grade_level, active=active)
 
 
@@ -24,6 +25,16 @@ def give_free_all_week(teacher, start=datetime.time(8, 0), end=datetime.time(16,
 
 def dt(year, month, day, hour, minute=0):
     return timezone.make_aware(datetime.datetime(year, month, day, hour, minute))
+
+
+def next_monday_dt(hour, minute=0):
+    """An aware datetime on the next upcoming Monday, for offer tests -
+    expire_stale_offers() compares against the real wall clock, so a fixed
+    past calendar date (like the 2024-01-08 used elsewhere in this file)
+    would look already-expired by the time this suite runs."""
+    today = timezone.localdate()
+    monday = today + datetime.timedelta(days=(7 - today.weekday()) % 7 or 7)
+    return timezone.make_aware(datetime.datetime.combine(monday, datetime.time(hour, minute)))
 
 
 def result_for(results, teacher):
@@ -40,6 +51,17 @@ def make_substitution(absence, substitute_teacher, start=None, end=None):
         substitute_teacher=substitute_teacher,
         start_datetime=start or absence.start_datetime,
         end_datetime=end or absence.end_datetime,
+    )
+
+
+def make_offer(absence, substitute_teacher, start=None, end=None, status=SubstitutionOffer.Status.PENDING):
+    """Create a SubstitutionOffer covering `absence`'s full range by default."""
+    return SubstitutionOffer.objects.create(
+        absence=absence,
+        substitute_teacher=substitute_teacher,
+        start_datetime=start or absence.start_datetime,
+        end_datetime=end or absence.end_datetime,
+        status=status,
     )
 
 
@@ -613,9 +635,10 @@ class PickSubstituteViewDiscardedPeriodsTests(TestCase):
 class SplitPickSubstituteViewTests(TestCase):
     def setUp(self):
         self.absent = make_teacher("absent_split_view", grade_level=Teacher.GradeLevel.PRIMARY)
-        # 2024-01-08 is a Monday, 9am-noon.
+        # Next Monday, 9am-noon - a future date, since this test's offers must
+        # still be PENDING (not expired) when accepted.
         self.absence = Absence.objects.create(
-            teacher=self.absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 12)
+            teacher=self.absent, start_datetime=next_monday_dt(9), end_datetime=next_monday_dt(12)
         )
         self.client.force_login(self.absent.user)
 
@@ -634,32 +657,270 @@ class SplitPickSubstituteViewTests(TestCase):
             end_time=datetime.time(12, 0),
         )
 
-    def test_picking_a_substitute_for_each_period_fully_covers_the_absence(self):
+    def test_picking_a_substitute_for_each_period_creates_offers_that_together_cover_the_absence(self):
         url = reverse("pick_substitute", args=[self.absence.pk])
 
         response = self.client.post(
             url,
             {
                 "slot_start": self.absence.start_datetime.isoformat(),
-                "slot_end": dt(2024, 1, 8, 10, 30).isoformat(),
+                "slot_end": next_monday_dt(10, 30).isoformat(),
                 "substitute_id": self.first_half.pk,
             },
         )
         self.assertRedirects(response, url)
-        self.assertEqual(
-            Substitution.objects.filter(absence=self.absence, substitute_teacher=self.first_half).count(), 1
-        )
+        first_offer = SubstitutionOffer.objects.get(absence=self.absence, substitute_teacher=self.first_half)
+        self.assertEqual(first_offer.status, SubstitutionOffer.Status.PENDING)
 
         response = self.client.post(
             url,
             {
-                "slot_start": dt(2024, 1, 8, 10, 30).isoformat(),
+                "slot_start": next_monday_dt(10, 30).isoformat(),
                 "slot_end": self.absence.end_datetime.isoformat(),
                 "substitute_id": self.second_half.pk,
             },
         )
-        self.assertRedirects(response, reverse("dashboard"))
+        self.assertRedirects(response, url)
+        second_offer = SubstitutionOffer.objects.get(absence=self.absence, substitute_teacher=self.second_half)
+
+        # No Substitution exists until each candidate accepts their offer.
+        self.assertFalse(Substitution.objects.filter(absence=self.absence).exists())
+
+        self.client.force_login(self.first_half.user)
+        self.client.post(reverse("respond_to_offer", args=[first_offer.pk]), {"action": "accept"})
+        self.client.force_login(self.second_half.user)
+        self.client.post(reverse("respond_to_offer", args=[second_offer.pk]), {"action": "accept"})
 
         substitutions = Substitution.objects.filter(absence=self.absence).order_by("start_datetime")
         self.assertEqual(list(substitutions.values_list("substitute_teacher", flat=True)),
                           [self.first_half.pk, self.second_half.pk])
+
+
+class PickSubstituteOfferFlowTests(TestCase):
+    def setUp(self):
+        self.absent = make_teacher("absent_offer_view", grade_level=Teacher.GradeLevel.PRIMARY)
+        self.absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=next_monday_dt(9), end_datetime=next_monday_dt(11)
+        )
+        self.client.force_login(self.absent.user)
+        self.url = reverse("pick_substitute", args=[self.absence.pk])
+
+    def _post(self, candidate):
+        return self.client.post(
+            self.url,
+            {
+                "slot_start": self.absence.start_datetime.isoformat(),
+                "slot_end": self.absence.end_datetime.isoformat(),
+                "substitute_id": candidate.pk,
+            },
+        )
+
+    def test_choosing_a_candidate_creates_a_pending_offer_not_a_substitution(self):
+        candidate = make_teacher("offer_candidate", email="candidate@example.edu")
+        give_free_all_week(candidate)
+
+        self._post(candidate)
+
+        offer = SubstitutionOffer.objects.get(absence=self.absence, substitute_teacher=candidate)
+        self.assertEqual(offer.status, SubstitutionOffer.Status.PENDING)
+        self.assertFalse(Substitution.objects.filter(absence=self.absence).exists())
+
+    def test_offer_notification_email_sent_to_the_candidate(self):
+        candidate = make_teacher("offer_emailed", email="candidate@example.edu")
+        give_free_all_week(candidate)
+
+        self._post(candidate)
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["candidate@example.edu"])
+
+    def test_blank_candidate_email_skips_sending_without_crashing(self):
+        candidate = make_teacher("offer_no_email")  # blank email by default
+        give_free_all_week(candidate)
+
+        response = self._post(candidate)
+
+        self.assertEqual(response.status_code, 302)
+        self.assertEqual(len(mail.outbox), 0)
+        self.assertTrue(SubstitutionOffer.objects.filter(absence=self.absence, substitute_teacher=candidate).exists())
+
+    def test_resubmitting_the_same_candidate_and_slot_does_not_duplicate_the_offer(self):
+        candidate = make_teacher("offer_resubmit", email="candidate@example.edu")
+        give_free_all_week(candidate)
+
+        self._post(candidate)
+        self._post(candidate)
+
+        self.assertEqual(
+            SubstitutionOffer.objects.filter(absence=self.absence, substitute_teacher=candidate).count(), 1
+        )
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_two_candidates_can_both_receive_a_parallel_offer_for_the_same_slot(self):
+        first = make_teacher("offer_parallel_1", email="first@example.edu")
+        give_free_all_week(first)
+        second = make_teacher("offer_parallel_2", email="second@example.edu")
+        give_free_all_week(second)
+
+        self._post(first)
+        self._post(second)
+
+        self.assertEqual(SubstitutionOffer.objects.filter(absence=self.absence).count(), 2)
+        self.assertFalse(Substitution.objects.filter(absence=self.absence).exists())
+
+    def test_page_shows_awaiting_response_for_a_pending_offer(self):
+        candidate = make_teacher("offer_pending_display", email="candidate@example.edu")
+        give_free_all_week(candidate)
+        self._post(candidate)
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, "Awaiting response")
+        self.assertContains(response, "Offer sent")
+
+    def test_offer_re_enabled_after_being_declined(self):
+        candidate = make_teacher("offer_declined_display", email="candidate@example.edu")
+        give_free_all_week(candidate)
+        offer = make_offer(self.absence, candidate, status=SubstitutionOffer.Status.DECLINED)
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, "Previously declined")
+        # Declined doesn't block re-offering: the submit form is still there.
+        self.assertContains(response, f'value="{candidate.pk}"')
+        self.assertNotEqual(offer.status, SubstitutionOffer.Status.PENDING)
+
+
+class RespondToOfferViewTests(TestCase):
+    def setUp(self):
+        self.absent = make_teacher("absent_respond", grade_level=Teacher.GradeLevel.PRIMARY, email="absent@example.edu")
+        self.candidate = make_teacher("respond_candidate", email="candidate@example.edu")
+        give_free_all_week(self.candidate)
+        # 2024-01-08 is a Monday.
+        self.absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 11)
+        )
+        self.offer = make_offer(self.absence, self.candidate)
+        self.url = reverse("respond_to_offer", args=[self.offer.pk])
+
+    def test_anonymous_get_redirects_to_login(self):
+        response = self.client.get(self.url)
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response.url)
+
+    def test_another_teachers_offer_is_not_found(self):
+        someone_else = make_teacher("respond_someone_else")
+        self.client.force_login(someone_else.user)
+
+        response = self.client.get(self.url)
+
+        self.assertEqual(response.status_code, 404)
+
+    def test_accept_creates_the_substitution_and_notifies_both_sides(self):
+        self.client.force_login(self.candidate.user)
+
+        response = self.client.post(self.url, {"action": "accept"})
+
+        self.assertRedirects(response, reverse("dashboard"))
+        self.offer.refresh_from_db()
+        self.assertEqual(self.offer.status, SubstitutionOffer.Status.ACCEPTED)
+        self.assertIsNotNone(self.offer.responded_at)
+        substitution = self.offer.resulting_substitution
+        self.assertIsNotNone(substitution)
+        self.assertEqual(substitution.substitute_teacher, self.candidate)
+
+        self.assertEqual(len(mail.outbox), 2)
+        confirmation = next(m for m in mail.outbox if m.to == ["candidate@example.edu"])
+        self.assertEqual(len(confirmation.attachments), 1)
+        filename, content, mimetype = confirmation.attachments[0]
+        self.assertEqual(filename, "substitution.ics")
+        self.assertIn("BEGIN:VEVENT", content)
+        reporter_notice = next(m for m in mail.outbox if m.to == ["absent@example.edu"])
+        self.assertTrue(reporter_notice.subject)
+
+    def test_accept_fails_gracefully_when_the_slot_is_already_covered(self):
+        other_substitute = make_teacher("respond_already_covered")
+        give_free_all_week(other_substitute)
+        make_substitution(self.absence, other_substitute)
+        self.client.force_login(self.candidate.user)
+
+        response = self.client.post(self.url, {"action": "accept"})
+
+        self.assertRedirects(response, reverse("dashboard"))
+        self.offer.refresh_from_db()
+        self.assertEqual(self.offer.status, SubstitutionOffer.Status.EXPIRED)
+        self.assertEqual(Substitution.objects.filter(absence=self.absence).count(), 1)
+
+    def test_accept_fails_gracefully_when_the_candidate_is_now_busy_elsewhere(self):
+        other_absent = make_teacher("respond_other_absent")
+        give_free_all_week(other_absent)
+        other_absence = Absence.objects.create(
+            teacher=other_absent, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 12)
+        )
+        make_substitution(other_absence, self.candidate)
+        self.client.force_login(self.candidate.user)
+
+        response = self.client.post(self.url, {"action": "accept"})
+
+        self.assertRedirects(response, reverse("dashboard"))
+        self.offer.refresh_from_db()
+        self.assertEqual(self.offer.status, SubstitutionOffer.Status.EXPIRED)
+        self.assertFalse(Substitution.objects.filter(absence=self.absence).exists())
+
+    def test_accepting_one_of_two_sibling_offers_expires_the_other(self):
+        other_candidate = make_teacher("respond_sibling", email="sibling@example.edu")
+        give_free_all_week(other_candidate)
+        sibling_offer = make_offer(self.absence, other_candidate)
+
+        self.client.force_login(self.candidate.user)
+        self.client.post(self.url, {"action": "accept"})
+
+        sibling_offer.refresh_from_db()
+        self.assertEqual(sibling_offer.status, SubstitutionOffer.Status.EXPIRED)
+        self.assertFalse(any(m.to == ["sibling@example.edu"] for m in mail.outbox))
+
+    def test_decline_notifies_the_reporting_teacher_and_creates_nothing(self):
+        self.client.force_login(self.candidate.user)
+
+        response = self.client.post(self.url, {"action": "decline"})
+
+        self.assertRedirects(response, reverse("dashboard"))
+        self.offer.refresh_from_db()
+        self.assertEqual(self.offer.status, SubstitutionOffer.Status.DECLINED)
+        self.assertFalse(Substitution.objects.filter(absence=self.absence).exists())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["absent@example.edu"])
+
+    def test_get_on_an_already_responded_offer_shows_read_only_status(self):
+        self.offer.status = SubstitutionOffer.Status.DECLINED
+        self.offer.save(update_fields=["status"])
+        self.client.force_login(self.candidate.user)
+
+        response = self.client.get(self.url)
+
+        self.assertContains(response, "already declined")
+        self.assertNotContains(response, "name=\"action\" value=\"accept\"")
+
+
+class DashboardOffersToMeTests(TestCase):
+    def test_pending_offer_listed_with_a_link_to_respond(self):
+        absent = make_teacher("dashboard_offer_absent")
+        candidate = make_teacher("dashboard_offer_candidate")
+        absence = Absence.objects.create(
+            teacher=absent, start_datetime=next_monday_dt(9), end_datetime=next_monday_dt(11)
+        )
+        offer = make_offer(absence, candidate)
+        self.client.force_login(candidate.user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Coverage requests for you")
+        self.assertContains(response, reverse("respond_to_offer", args=[offer.pk]))
+
+    def test_no_card_when_there_are_no_pending_offers(self):
+        candidate = make_teacher("dashboard_no_offers")
+        self.client.force_login(candidate.user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertNotContains(response, "Coverage requests for you")

@@ -49,3 +49,52 @@ class Substitution(models.Model):
 
     def __str__(self):
         return f"{self.substitute_teacher} covers {self.absence} ({self.start_datetime} - {self.end_datetime})"
+
+
+class SubstitutionOffer(models.Model):
+    """A pending request for a specific teacher to cover part of an absence.
+    Notified by email; the candidate accepts or rejects it in-app. Accepting
+    creates the confirmed Substitution - this model never affects what counts
+    as covered on its own."""
+
+    class Status(models.TextChoices):
+        PENDING = "pending", _("Pending")
+        ACCEPTED = "accepted", _("Accepted")
+        DECLINED = "declined", _("Declined")
+        EXPIRED = "expired", _("Expired")
+
+    absence = models.ForeignKey(Absence, on_delete=models.CASCADE, related_name="offers")
+    substitute_teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name="substitution_offers")
+    start_datetime = models.DateTimeField(verbose_name=_("offered from"))
+    end_datetime = models.DateTimeField(verbose_name=_("offered until"))
+    status = models.CharField(
+        max_length=10, choices=Status.choices, default=Status.PENDING, verbose_name=_("status")
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("offered at"))
+    responded_at = models.DateTimeField(null=True, blank=True, verbose_name=_("responded at"))
+    resulting_substitution = models.OneToOneField(
+        Substitution,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="offer",
+        verbose_name=_("resulting substitution"),
+    )
+
+    class Meta:
+        ordering = ["-created_at"]
+        verbose_name = _("substitution offer")
+        verbose_name_plural = _("substitution offers")
+        constraints = [
+            models.CheckConstraint(
+                check=models.Q(end_datetime__gt=models.F("start_datetime")), name="substitution_offer_end_after_start"
+            ),
+            models.UniqueConstraint(
+                fields=["absence", "substitute_teacher", "start_datetime", "end_datetime"],
+                condition=models.Q(status="pending"),
+                name="unique_pending_offer_per_candidate_slot",
+            ),
+        ]
+
+    def __str__(self):
+        return f"{self.substitute_teacher} offered {self.absence} ({self.get_status_display()})"

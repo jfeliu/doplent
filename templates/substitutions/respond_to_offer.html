@@ -1,0 +1,41 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% translate "Substitution request" %}{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3"><i class="bi bi-envelope-check text-primary me-1"></i>{% translate "Substitution request" %}</h1>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="fw-semibold">{{ offer.absence.teacher }}</div>
+    <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ offer.start_datetime }} &ndash; {{ offer.end_datetime }}</div>
+    {% if offer.absence.reason %}<div class="text-muted small mt-1">{{ offer.absence.reason }}</div>{% endif %}
+  </div>
+</div>
+
+{% if offer.status == "pending" %}
+<div class="d-flex gap-2">
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="accept">
+    <button type="submit" class="btn btn-success"><i class="bi bi-check-circle-fill"></i> {% translate "Accept" %}</button>
+  </form>
+  <form method="post">
+    {% csrf_token %}
+    <input type="hidden" name="action" value="decline">
+    <button type="submit" class="btn btn-outline-danger"><i class="bi bi-x-circle"></i> {% translate "Decline" %}</button>
+  </form>
+</div>
+{% else %}
+<div class="alert alert-info d-flex align-items-center gap-2">
+  <i class="bi bi-info-circle"></i>
+  {% if offer.status == "accepted" %}
+    {% translate "You already accepted this request." %}
+  {% elif offer.status == "declined" %}
+    {% translate "You already declined this request." %}
+  {% else %}
+    {% translate "This request is no longer available." %}
+  {% endif %}
+</div>
+<a href="{% url 'dashboard' %}">{% translate "Back to dashboard" %}</a>
+{% endif %}
+{% endblock %}

@@ -1,7 +1,7 @@
-# Catalan translations for the substi-fedac substitution management app.
+# Catalan translations for the Doplent substitution management app.
 msgid ""
 msgstr ""
-"Project-Id-Version: substi-fedac\n"
+"Project-Id-Version: doplent\n"
 "Report-Msgid-Bugs-To: \n"
 "POT-Creation-Date: 2026-08-13 12:16+0000\n"
 "PO-Revision-Date: 2026-08-13 12:16+0000\n"
@@ -152,8 +152,11 @@ msgstr ""
 msgid "weekly non-teaching hours"
 msgstr "hores setmanals sense docència"
 
-msgid "Substitutions"
-msgstr "Substitucions"
+msgid "Doplent"
+msgstr "Doplent"
+
+msgid "Doplent admin"
+msgstr "Doplent admin"
 
 msgid "Dashboard"
 msgstr "Tauler"
@@ -389,3 +392,147 @@ msgstr "Elimina"
 
 msgid "Save"
 msgstr "Desa"
+
+msgid "Pending"
+msgstr "Pendent"
+
+msgid "Accepted"
+msgstr "Acceptada"
+
+msgid "Declined"
+msgstr "Rebutjada"
+
+msgid "Expired"
+msgstr "Caducada"
+
+msgid "offered from"
+msgstr "oferta des de"
+
+msgid "offered until"
+msgstr "oferta fins a"
+
+msgid "status"
+msgstr "estat"
+
+msgid "offered at"
+msgstr "oferta el"
+
+msgid "responded at"
+msgstr "respost el"
+
+msgid "resulting substitution"
+msgstr "substitució resultant"
+
+msgid "substitution offer"
+msgstr "oferta de substitució"
+
+msgid "substitution offers"
+msgstr "ofertes de substitució"
+
+#, python-format
+msgid "Offer sent to %(teacher)s."
+msgstr "Oferta enviada a %(teacher)s."
+
+msgid "You're confirmed to cover this."
+msgstr "Confirmat: cobriràs aquesta substitució."
+
+msgid "Sorry - this slot is no longer available."
+msgstr "Ho sentim: aquest període ja no està disponible."
+
+msgid "You've declined this offer."
+msgstr "Has rebutjat aquesta oferta."
+
+#, python-format
+msgid "Covering for %(teacher)s"
+msgstr "Substitució de %(teacher)s"
+
+#, python-format
+msgid "Substitution request: %(teacher)s, %(start)s"
+msgstr "Sol·licitud de substitució: %(teacher)s, %(start)s"
+
+#, python-format
+msgid "You're confirmed to cover for %(teacher)s"
+msgstr "Confirmat: substitueixes %(teacher)s"
+
+#, python-format
+msgid "%(substitute)s will cover your absence"
+msgstr "%(substitute)s cobrirà la teva absència"
+
+#, python-format
+msgid "%(teacher)s can't cover your absence"
+msgstr "%(teacher)s no pot cobrir la teva absència"
+
+msgid "Awaiting response"
+msgstr "Esperant resposta"
+
+msgid "Previously declined"
+msgstr "Rebutjada anteriorment"
+
+msgid "Offer"
+msgstr "Ofereix"
+
+msgid "Offer sent"
+msgstr "Oferta enviada"
+
+msgid "Coverage requests for you"
+msgstr "Sol·licituds de substitució per a tu"
+
+msgid "Respond"
+msgstr "Respon"
+
+#, python-format
+msgid "%(counter)s offer sent"
+msgid_plural "%(counter)s offers sent"
+msgstr[0] "%(counter)s oferta enviada"
+msgstr[1] "%(counter)s ofertes enviades"
+
+msgid "Substitution request"
+msgstr "Sol·licitud de substitució"
+
+msgid "Accept"
+msgstr "Accepta"
+
+msgid "Decline"
+msgstr "Rebutja"
+
+msgid "You already accepted this request."
+msgstr "Ja has acceptat aquesta sol·licitud."
+
+msgid "You already declined this request."
+msgstr "Ja has rebutjat aquesta sol·licitud."
+
+msgid "This request is no longer available."
+msgstr "Aquesta sol·licitud ja no està disponible."
+
+msgid "Back to dashboard"
+msgstr "Torna al tauler"
+
+#, python-format
+msgid "%(teacher)s needs a substitute from %(start)s to %(end)s."
+msgstr "%(teacher)s necessita un/a substitut/a de %(start)s a %(end)s."
+
+#, python-format
+msgid "Reason: %(reason)s"
+msgstr "Motiu: %(reason)s"
+
+msgid "Respond here:"
+msgstr "Respon aquí:"
+
+msgid "A calendar file is attached."
+msgstr "S'adjunta un fitxer de calendari."
+
+#, python-format
+msgid "%(substitute)s will cover your absence from %(start)s to %(end)s."
+msgstr "%(substitute)s cobrirà la teva absència de %(start)s a %(end)s."
+
+#, python-format
+msgid ""
+"%(teacher)s can't cover your absence from %(start)s to %(end)s. Pick another"
+" substitute from your dashboard."
+msgstr ""
+"%(teacher)s no pot cobrir la teva absència de %(start)s a %(end)s. Tria un "
+"altre substitut/a des del teu tauler."
+
+#, python-format
+msgid "You're confirmed to cover for %(teacher)s from %(start)s to %(end)s."
+msgstr "Confirmat: substitueixes %(teacher)s de %(start)s a %(end)s."

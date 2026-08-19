@@ -7,6 +7,24 @@
   <p class="text-muted mb-0">{{ teacher.get_grade_level_display }}</p>
 </div>
 
+{% if my_pending_offers %}
+<div class="card mb-4">
+  <div class="card-header"><i class="bi bi-envelope-exclamation text-primary"></i>{% translate "Coverage requests for you" %}</div>
+  <ul class="list-group list-group-flush">
+    {% for offer in my_pending_offers %}
+    <li class="list-group-item py-3 d-flex justify-content-between align-items-center gap-2">
+      <div>
+        <div class="fw-semibold">{{ offer.absence.teacher }}</div>
+        <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ offer.start_datetime }} &ndash; {{ offer.end_datetime }}</div>
+        {% if offer.absence.reason %}<div class="text-muted small">{{ offer.absence.reason }}</div>{% endif %}
+      </div>
+      <a href="{% url 'respond_to_offer' offer.pk %}" class="btn btn-sm btn-primary">{% translate "Respond" %}</a>
+    </li>
+    {% endfor %}
+  </ul>
+</div>
+{% endif %}
+
 <div class="row g-4">
   <div class="col-md-6">
     <div class="card h-100">
@@ -26,8 +44,13 @@
             </div>
           {% endif %}
           {% if not absence.is_fully_covered %}
-            <div class="small mt-2 d-flex align-items-center gap-2">
+            <div class="small mt-2 d-flex align-items-center gap-2 flex-wrap">
               <span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-exclamation-triangle-fill"></i> {% translate "Not fully covered yet" %}</span>
+              {% if absence.pending_offers_count %}
+              <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-hourglass-split"></i>
+                {% blocktranslate count counter=absence.pending_offers_count %}{{ counter }} offer sent{% plural %}{{ counter }} offers sent{% endblocktranslate %}
+              </span>
+              {% endif %}
               <a href="{% url 'pick_substitute' absence.id %}">{% translate "choose a substitute" %}</a>
             </div>
           {% endif %}
