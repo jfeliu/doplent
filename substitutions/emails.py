@@ -9,6 +9,8 @@ from django.urls import reverse
 from django.utils import timezone
 from django.utils.translation import gettext as _
 
+from .dates_ca import format_ca_datetime
+
 logger = logging.getLogger(__name__)
 
 
@@ -61,7 +63,7 @@ def send_offer_notification(request, offer) -> None:
     url = request.build_absolute_uri(reverse("respond_to_offer", args=[offer.pk]))
     subject = _("Substitution request: %(teacher)s, %(start)s") % {
         "teacher": offer.absence.teacher,
-        "start": offer.start_datetime,
+        "start": format_ca_datetime(offer.start_datetime),
     }
     _send(
         offer.substitute_teacher,

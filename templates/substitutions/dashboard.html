@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n ca_dates %}
 {% block title %}{% translate "Dashboard" %}{% endblock %}
 {% block content %}
 <div class="mb-4">
@@ -15,7 +15,7 @@
     <li class="list-group-item py-3 d-flex justify-content-between align-items-center gap-2">
       <div>
         <div class="fw-semibold">{{ offer.absence.teacher }}</div>
-        <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ offer.start_datetime }} &ndash; {{ offer.end_datetime }}</div>
+        <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ offer.start_datetime|ca_datetime }} &ndash; {{ offer.end_datetime|ca_datetime }}</div>
         {% if offer.absence.reason %}<div class="text-muted small">{{ offer.absence.reason }}</div>{% endif %}
       </div>
       <a href="{% url 'respond_to_offer' offer.pk %}" class="btn btn-sm btn-primary">{% translate "Respond" %}</a>
@@ -33,13 +33,13 @@
       <ul class="list-group list-group-flush">
         {% for absence in my_absences %}
         <li class="list-group-item py-3">
-          <div class="fw-semibold"><i class="bi bi-clock-history text-muted me-1"></i>{{ absence.start_datetime }} &ndash; {{ absence.end_datetime }}</div>
+          <div class="fw-semibold"><i class="bi bi-clock-history text-muted me-1"></i>{{ absence.start_datetime|ca_datetime }} &ndash; {{ absence.end_datetime|ca_datetime }}</div>
           {% if absence.reason %}<div class="text-muted small mt-1">{{ absence.reason }}</div>{% endif %}
           {% if absence.substitutions.all %}
             <div class="small mt-2 d-flex flex-column align-items-start gap-1">
               {% for sub in absence.substitutions.all %}
               <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-check-circle-fill"></i>
-              {% blocktranslate with substitute=sub.substitute_teacher start=sub.start_datetime end=sub.end_datetime %}{{ substitute }} ({{ start }} &ndash; {{ end }}){% endblocktranslate %}</span>
+              {% blocktranslate with substitute=sub.substitute_teacher start=sub.start_datetime|ca_datetime end=sub.end_datetime|ca_datetime %}{{ substitute }} ({{ start }} &ndash; {{ end }}){% endblocktranslate %}</span>
               {% endfor %}
             </div>
           {% endif %}
@@ -76,7 +76,7 @@
         {% for sub in covering %}
         <li class="list-group-item py-3">
           <div class="fw-semibold">{{ sub.absence.teacher }}</div>
-          <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ sub.start_datetime }} &ndash; {{ sub.end_datetime }}</div>
+          <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ sub.start_datetime|ca_datetime }} &ndash; {{ sub.end_datetime|ca_datetime }}</div>
         </li>
         {% endfor %}
       </ul>

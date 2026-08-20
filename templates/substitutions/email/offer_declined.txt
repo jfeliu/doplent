@@ -1,1 +1,1 @@
-{% load i18n %}{% blocktranslate with teacher=offer.substitute_teacher start=offer.start_datetime end=offer.end_datetime %}{{ teacher }} can't cover your absence from {{ start }} to {{ end }}. Pick another substitute from your dashboard.{% endblocktranslate %}
+{% load i18n ca_dates %}{% blocktranslate with teacher=offer.substitute_teacher start=offer.start_datetime|ca_datetime end=offer.end_datetime|ca_datetime %}{{ teacher }} can't cover your absence from {{ start }} to {{ end }}. Pick another substitute from your dashboard.{% endblocktranslate %}

@@ -1,1 +1,1 @@
-{% load i18n %}{% blocktranslate with substitute=substitution.substitute_teacher start=substitution.start_datetime end=substitution.end_datetime %}{{ substitute }} will cover your absence from {{ start }} to {{ end }}.{% endblocktranslate %}
+{% load i18n ca_dates %}{% blocktranslate with substitute=substitution.substitute_teacher start=substitution.start_datetime|ca_datetime end=substitution.end_datetime|ca_datetime %}{{ substitute }} will cover your absence from {{ start }} to {{ end }}.{% endblocktranslate %}

@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n ca_dates %}
 {% block title %}{% translate "Substitution request" %}{% endblock %}
 {% block content %}
 <h1 class="h4 mb-3"><i class="bi bi-envelope-check text-primary me-1"></i>{% translate "Substitution request" %}</h1>
@@ -7,7 +7,7 @@
 <div class="card mb-3">
   <div class="card-body">
     <div class="fw-semibold">{{ offer.absence.teacher }}</div>
-    <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ offer.start_datetime }} &ndash; {{ offer.end_datetime }}</div>
+    <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ offer.start_datetime|ca_datetime }} &ndash; {{ offer.end_datetime|ca_datetime }}</div>
     {% if offer.absence.reason %}<div class="text-muted small mt-1">{{ offer.absence.reason }}</div>{% endif %}
   </div>
 </div>

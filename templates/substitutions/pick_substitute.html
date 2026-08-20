@@ -1,9 +1,9 @@
 {% extends "base.html" %}
-{% load i18n %}
+{% load i18n ca_dates %}
 {% block title %}{% translate "Pick a substitute" %}{% endblock %}
 {% block content %}
 <h1 class="h4 mb-1"><i class="bi bi-person-check text-primary me-1"></i>{% translate "Pick a substitute" %}</h1>
-<p class="text-muted mb-3"><i class="bi bi-clock-history me-1"></i>{{ absence.start_datetime }} &ndash; {{ absence.end_datetime }}</p>
+<p class="text-muted mb-3"><i class="bi bi-clock-history me-1"></i>{{ absence.start_datetime|ca_datetime }} &ndash; {{ absence.end_datetime|ca_datetime }}</p>
 
 {% if slots|length > 1 %}
 <div class="alert alert-info d-flex align-items-center gap-2">
@@ -18,7 +18,7 @@
   <ul class="list-group list-group-flush">
     {% for period in discarded_periods %}
     <li class="list-group-item d-flex justify-content-between align-items-center py-2">
-      <span><i class="bi bi-clock-history text-muted me-1"></i>{{ period.start_datetime }} &ndash; {{ period.end_datetime }}</span>
+      <span><i class="bi bi-clock-history text-muted me-1"></i>{{ period.start_datetime|ca_datetime }} &ndash; {{ period.end_datetime|ca_datetime }}</span>
       {% if period.reason == "outside_working_hours" %}
       <span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-moon-fill"></i> {% translate "Outside school hours" %}</span>
       {% else %}
@@ -34,7 +34,7 @@
   <div class="col-md-7 d-flex flex-column gap-4">
     {% for slot in slots %}
     <div>
-      <h2 class="h6 mb-2"><i class="bi bi-clock-history text-muted me-1"></i>{% translate "Covering" %} {{ slot.start_datetime }} &ndash; {{ slot.end_datetime }}</h2>
+      <h2 class="h6 mb-2"><i class="bi bi-clock-history text-muted me-1"></i>{% translate "Covering" %} {{ slot.start_datetime|ca_datetime }} &ndash; {{ slot.end_datetime|ca_datetime }}</h2>
       {% if slot.candidates %}
       <div class="card">
         <ul class="list-group list-group-flush">
