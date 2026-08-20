@@ -156,6 +156,9 @@
         <a class="nav-link" href="{% url 'dashboard' %}"><i class="bi bi-grid"></i>{% translate "Dashboard" %}</a>
         <a class="nav-link" href="{% url 'report_absence' %}"><i class="bi bi-calendar-plus"></i>{% translate "Report absence" %}</a>
         <a class="nav-link" href="{% url 'edit_schedule' %}"><i class="bi bi-clock"></i>{% translate "My schedule" %}</a>
+        {% if user.is_staff %}
+        <a class="nav-link" href="{% url 'admin:index' %}"><i class="bi bi-shield-lock"></i>{% translate "Admin" %}</a>
+        {% endif %}
         <form method="post" action="{% url 'logout' %}" class="d-inline">
           {% csrf_token %}
           <button type="submit" class="btn btn-link nav-link p-0"><i class="bi bi-box-arrow-right"></i>{% translate "Log out" %}</button>

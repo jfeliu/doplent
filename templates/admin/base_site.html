@@ -31,12 +31,17 @@
     --font-family-primary: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   }
   #site-name a { display: flex; align-items: center; gap: .5rem; }
+  #site-name { display: flex; align-items: center; gap: 1rem; }
+  #site-name .home-link { font-size: .8rem; display: inline-flex; align-items: center; gap: .3rem; }
 </style>
 {% endblock %}
 
 {% block branding %}
 <div id="site-name">
   <a href="{% url 'admin:index' %}"><i class="bi bi-calendar2-check"></i>{{ site_header|default:_('Django administration') }}</a>
+  {% if user.is_authenticated %}
+  <a class="home-link" href="{% url 'dashboard' %}"><i class="bi bi-house"></i>{% translate "Home" %}</a>
+  {% endif %}
 </div>
 {% if user.is_anonymous %}
   {% include "admin/color_theme_toggle.html" %}
