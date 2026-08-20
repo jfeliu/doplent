@@ -1,19 +1,221 @@
 {% extends "base.html" %}
 {% load i18n %}
 {% block title %}{% translate "Report absence" %}{% endblock %}
+{% block extra_head %}
+<style>
+  .date-display-wrap { position: relative; }
+  .date-picker-popup {
+    position: absolute;
+    z-index: 20;
+    top: calc(100% + .3rem);
+    left: 0;
+    width: 17rem;
+    background: #fff;
+    border: 1px solid var(--surface-border);
+    border-radius: .6rem;
+    box-shadow: var(--surface-shadow);
+    padding: .75rem;
+  }
+  .date-picker-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: .5rem; }
+  .date-picker-title { font-weight: 600; font-size: .9rem; text-transform: capitalize; }
+  .date-picker-nav {
+    border: none; background: transparent; font-size: 1.1rem; line-height: 1;
+    width: 1.8rem; height: 1.8rem; border-radius: .4rem; cursor: pointer; color: #55566b;
+  }
+  .date-picker-nav:hover { background: #f1f1f8; }
+  .date-picker-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: .15rem; }
+  .date-picker-weekday { font-size: .7rem; font-weight: 600; text-align: center; color: #8a8ba0; padding: .2rem 0; text-transform: capitalize; }
+  .date-picker-day {
+    border: none; background: transparent; padding: .35rem 0; border-radius: .4rem;
+    font-size: .85rem; cursor: pointer; text-align: center;
+  }
+  .date-picker-day:hover { background: #f1f1f8; }
+  .date-picker-day.today { font-weight: 700; color: var(--bs-primary); box-shadow: inset 0 0 0 1.5px var(--bs-primary); }
+  .date-picker-day.selected { background: var(--bs-primary); color: #fff; font-weight: 600; box-shadow: none; }
+</style>
+{% endblock %}
 {% block content %}
 <h1 class="h4 mb-3"><i class="bi bi-calendar-plus text-primary me-1"></i>{% translate "Report a time frame you can't work" %}</h1>
 <div class="row">
   <div class="col-md-6">
     <div class="card">
       <div class="card-body p-4">
-        <form method="post">
+        <form method="post" novalidate>
           {% csrf_token %}
-          {{ form.as_p }}
+          {% if form.non_field_errors %}
+          <ul class="errorlist">
+            {% for error in form.non_field_errors %}<li>{{ error }}</li>{% endfor %}
+          </ul>
+          {% endif %}
+
+          <div class="mb-3 date-display-wrap">
+            <label for="id_date_display">{{ form.date.label }}</label>
+            {{ form.date }}
+            <input type="text" id="id_date_display" readonly autocomplete="off" placeholder="Selecciona una data">
+            <div id="date-picker" class="date-picker-popup" style="display:none;"></div>
+            {% for error in form.date.errors %}<span class="errorlist"><span>{{ error }}</span></span>{% endfor %}
+          </div>
+
+          <div class="form-check mb-3">
+            {{ form.whole_day }}
+            <label class="form-check-label" for="{{ form.whole_day.id_for_label }}">{{ form.whole_day.label }}</label>
+          </div>
+
+          <div class="row" id="time-range-fields">
+            <div class="col-6 mb-3">
+              <label for="{{ form.start_time.id_for_label }}">{{ form.start_time.label }}</label>
+              {{ form.start_time }}
+              {% for error in form.start_time.errors %}<span class="errorlist"><span>{{ error }}</span></span>{% endfor %}
+            </div>
+            <div class="col-6 mb-3">
+              <label for="{{ form.end_time.id_for_label }}">{{ form.end_time.label }}</label>
+              {{ form.end_time }}
+              {% for error in form.end_time.errors %}<span class="errorlist"><span>{{ error }}</span></span>{% endfor %}
+            </div>
+          </div>
+
+          <div class="mb-3">
+            <label for="{{ form.reason.id_for_label }}">{{ form.reason.label }}</label>
+            {{ form.reason }}
+            {% for error in form.reason.errors %}<span class="errorlist"><span>{{ error }}</span></span>{% endfor %}
+          </div>
+
           <button type="submit" class="btn btn-primary mt-2"><i class="bi bi-search"></i> {% translate "Find substitutes" %}</button>
         </form>
       </div>
     </div>
   </div>
 </div>
+
+<script>
+(function () {
+  var wholeDayCheckbox = document.getElementById("{{ form.whole_day.id_for_label }}");
+  var startTimeField = document.getElementById("{{ form.start_time.id_for_label }}");
+  var endTimeField = document.getElementById("{{ form.end_time.id_for_label }}");
+
+  function applyWholeDay() {
+    var wholeDay = wholeDayCheckbox.checked;
+    startTimeField.disabled = wholeDay;
+    endTimeField.disabled = wholeDay;
+    if (wholeDay) {
+      startTimeField.value = "09:00";
+      endTimeField.value = "17:00";
+    }
+  }
+
+  wholeDayCheckbox.addEventListener("change", applyWholeDay);
+
+  applyWholeDay();
+})();
+
+(function () {
+  var CA_MONTHS = ["gener", "febrer", "març", "abril", "maig", "juny", "juliol", "agost", "setembre", "octubre", "novembre", "desembre"];
+  var CA_WEEKDAYS = ["diumenge", "dilluns", "dimarts", "dimecres", "dijous", "divendres", "dissabte"];
+  var CA_WEEKDAYS_SHORT = ["dl", "dt", "dc", "dj", "dv", "ds", "dg"];
+
+  var hiddenInput = document.getElementById("id_date");
+  var displayInput = document.getElementById("id_date_display");
+  var popup = document.getElementById("date-picker");
+  var selected = null;
+  var viewYear, viewMonth;
+
+  function pad2(n) { return n < 10 ? "0" + n : "" + n; }
+  function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+  function parseISO(value) {
+    if (!value) return null;
+    var parts = value.split("-");
+    return new Date(parseInt(parts[0], 10), parseInt(parts[1], 10) - 1, parseInt(parts[2], 10));
+  }
+
+  function toISO(date) {
+    return date.getFullYear() + "-" + pad2(date.getMonth() + 1) + "-" + pad2(date.getDate());
+  }
+
+  function formatDisplay(date) {
+    return capitalize(CA_WEEKDAYS[date.getDay()]) + ", " + pad2(date.getDate()) + "/" + pad2(date.getMonth() + 1) + "/" + date.getFullYear();
+  }
+
+  function selectDate(date) {
+    selected = date;
+    hiddenInput.value = toISO(date);
+    displayInput.value = formatDisplay(date);
+    closePopup();
+  }
+
+  function render() {
+    var firstOfMonth = new Date(viewYear, viewMonth, 1);
+    var startOffset = (firstOfMonth.getDay() + 6) % 7;
+    var daysInMonth = new Date(viewYear, viewMonth + 1, 0).getDate();
+
+    var html = '<div class="date-picker-header">';
+    html += '<button type="button" class="date-picker-nav" data-nav="-1">&lsaquo;</button>';
+    html += '<span class="date-picker-title">' + CA_MONTHS[viewMonth] + ' ' + viewYear + '</span>';
+    html += '<button type="button" class="date-picker-nav" data-nav="1">&rsaquo;</button>';
+    html += '</div><div class="date-picker-grid">';
+    for (var w = 0; w < 7; w++) {
+      html += '<span class="date-picker-weekday">' + CA_WEEKDAYS_SHORT[w] + '</span>';
+    }
+    for (var s = 0; s < startOffset; s++) {
+      html += '<span></span>';
+    }
+    var today = new Date();
+    for (var day = 1; day <= daysInMonth; day++) {
+      var isSelected = selected && selected.getFullYear() === viewYear && selected.getMonth() === viewMonth && selected.getDate() === day;
+      var isToday = today.getFullYear() === viewYear && today.getMonth() === viewMonth && today.getDate() === day;
+      var cls = "date-picker-day" + (isToday ? " today" : "") + (isSelected ? " selected" : "");
+      html += '<button type="button" class="' + cls + '" data-day="' + day + '">' + day + '</button>';
+    }
+    html += '</div>';
+    popup.innerHTML = html;
+
+    var navButtons = popup.querySelectorAll("[data-nav]");
+    for (var i = 0; i < navButtons.length; i++) {
+      navButtons[i].addEventListener("click", function (e) {
+        e.stopPropagation();
+        viewMonth += parseInt(e.currentTarget.getAttribute("data-nav"), 10);
+        if (viewMonth < 0) { viewMonth = 11; viewYear -= 1; }
+        if (viewMonth > 11) { viewMonth = 0; viewYear += 1; }
+        render();
+      });
+    }
+    var dayButtons = popup.querySelectorAll("[data-day]");
+    for (var j = 0; j < dayButtons.length; j++) {
+      dayButtons[j].addEventListener("click", function (e) {
+        e.stopPropagation();
+        selectDate(new Date(viewYear, viewMonth, parseInt(e.currentTarget.getAttribute("data-day"), 10)));
+      });
+    }
+  }
+
+  function openPopup() {
+    render();
+    popup.style.display = "block";
+  }
+
+  function closePopup() {
+    popup.style.display = "none";
+  }
+
+  var initial = parseISO(hiddenInput.value);
+  var today = new Date();
+  if (initial) {
+    selected = initial;
+    displayInput.value = formatDisplay(initial);
+    viewYear = initial.getFullYear();
+    viewMonth = initial.getMonth();
+  } else {
+    viewYear = today.getFullYear();
+    viewMonth = today.getMonth();
+  }
+
+  displayInput.addEventListener("click", openPopup);
+  displayInput.addEventListener("focus", openPopup);
+  document.addEventListener("click", function (e) {
+    if (e.target !== displayInput && !popup.contains(e.target)) {
+      closePopup();
+    }
+  });
+})();
+</script>
 {% endblock %}

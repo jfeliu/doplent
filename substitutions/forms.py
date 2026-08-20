@@ -1,21 +1,71 @@
+from datetime import datetime, time, timedelta
+
 from django import forms
+from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from .models import Absence
 
+WHOLE_DAY_START = time(9, 0)
+WHOLE_DAY_END = time(17, 0)
+
+
+def _time_choices():
+    choices = [("", "---------")]
+    current = datetime.combine(datetime.min, WHOLE_DAY_START)
+    end = datetime.combine(datetime.min, WHOLE_DAY_END)
+    while current <= end:
+        label = current.strftime("%H:%M")
+        choices.append((label, label))
+        current += timedelta(minutes=30)
+    return choices
+
+
+TIME_CHOICES = _time_choices()
+
 
 class AbsenceForm(forms.ModelForm):
+    date = forms.DateField(label="Data", widget=forms.HiddenInput())
+    whole_day = forms.BooleanField(
+        label="Tot el dia (9:00 - 17:00)",
+        required=False,
+        widget=forms.CheckboxInput(attrs={"class": "form-check-input"}),
+    )
+    start_time = forms.ChoiceField(label="Des de", required=False, choices=TIME_CHOICES)
+    end_time = forms.ChoiceField(label="Fins a", required=False, choices=TIME_CHOICES)
+
     class Meta:
         model = Absence
-        fields = ["start_datetime", "end_datetime", "reason"]
-        widgets = {
-            "start_datetime": forms.DateTimeInput(attrs={"type": "datetime-local"}),
-            "end_datetime": forms.DateTimeInput(attrs={"type": "datetime-local"}),
-        }
+        fields = ["reason"]
+        field_order = ["date", "whole_day", "start_time", "end_time", "reason"]
 
     def clean(self):
         cleaned = super().clean()
-        start, end = cleaned.get("start_datetime"), cleaned.get("end_datetime")
-        if start and end and end <= start:
-            raise forms.ValidationError(_("End must be after start."))
+        date = cleaned.get("date")
+        whole_day = cleaned.get("whole_day")
+        start_time_str = cleaned.get("start_time")
+        end_time_str = cleaned.get("end_time")
+
+        if whole_day:
+            start_time, end_time = WHOLE_DAY_START, WHOLE_DAY_END
+        elif not start_time_str or not end_time_str:
+            self.add_error(None, _("Enter a start and end time, or select whole day."))
+            start_time = end_time = None
+        else:
+            start_time = datetime.strptime(start_time_str, "%H:%M").time()
+            end_time = datetime.strptime(end_time_str, "%H:%M").time()
+            if end_time <= start_time:
+                self.add_error(None, _("End must be after start."))
+
+        if date and start_time and end_time:
+            cleaned["start_datetime"] = timezone.make_aware(datetime.combine(date, start_time))
+            cleaned["end_datetime"] = timezone.make_aware(datetime.combine(date, end_time))
         return cleaned
+
+    def save(self, commit=True):
+        instance = super().save(commit=False)
+        instance.start_datetime = self.cleaned_data["start_datetime"]
+        instance.end_datetime = self.cleaned_data["end_datetime"]
+        if commit:
+            instance.save()
+        return instance
