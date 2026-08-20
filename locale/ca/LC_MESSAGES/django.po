@@ -204,7 +204,7 @@ msgid "No absences reported yet."
 msgstr "Encara no s'ha notificat cap absència."
 
 msgid "Substitutions I'm covering"
-msgstr "Substitucions que estic cobrint"
+msgstr "Substitucions que he de cobrir"
 
 msgid "None yet."
 msgstr "Cap encara."
