@@ -776,7 +776,7 @@ class PickSubstituteOfferFlowTests(TestCase):
         response = self.client.get(self.url)
 
         self.assertContains(response, "Awaiting response")
-        self.assertContains(response, "Offer sent")
+        self.assertContains(response, "Awaiting confirmation")
 
     def test_offer_re_enabled_after_being_declined(self):
         candidate = make_teacher("offer_declined_display", email="candidate@example.edu")

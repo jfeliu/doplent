@@ -430,8 +430,8 @@ msgid "substitution offers"
 msgstr "ofertes de substitució"
 
 #, python-format
-msgid "Offer sent to %(teacher)s."
-msgstr "Oferta enviada a %(teacher)s."
+msgid "%(teacher)s chosen, awaiting confirmation."
+msgstr "Triat: %(teacher)s, pendent de confirmació."
 
 msgid "You're confirmed to cover this."
 msgstr "Confirmat: cobriràs aquesta substitució."
@@ -468,11 +468,11 @@ msgstr "Esperant resposta"
 msgid "Previously declined"
 msgstr "Rebutjada anteriorment"
 
-msgid "Offer"
-msgstr "Ofereix"
+msgid "Choose"
+msgstr "Tria"
 
-msgid "Offer sent"
-msgstr "Oferta enviada"
+msgid "Awaiting confirmation"
+msgstr "Pendent de confirmació"
 
 msgid "Coverage requests for you"
 msgstr "Sol·licituds de substitució per a tu"
@@ -481,10 +481,10 @@ msgid "Respond"
 msgstr "Respon"
 
 #, python-format
-msgid "%(counter)s offer sent"
-msgid_plural "%(counter)s offers sent"
-msgstr[0] "%(counter)s oferta enviada"
-msgstr[1] "%(counter)s ofertes enviades"
+msgid "%(counter)s awaiting confirmation"
+msgid_plural "%(counter)s awaiting confirmation"
+msgstr[0] "%(counter)s pendent de confirmació"
+msgstr[1] "%(counter)s pendents de confirmació"
 
 msgid "Substitution request"
 msgstr "Sol·licitud de substitució"

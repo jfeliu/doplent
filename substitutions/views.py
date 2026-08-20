@@ -87,7 +87,7 @@ def pick_substitute(request, absence_id):
             offer, created = create_offer(absence, chosen, slot_start, slot_end)
             if created:
                 emails.send_offer_notification(request, offer)
-                messages.info(request, _("Offer sent to %(teacher)s.") % {"teacher": chosen})
+                messages.info(request, _("%(teacher)s chosen, awaiting confirmation.") % {"teacher": chosen})
             return redirect("pick_substitute", absence_id=absence.pk)
 
     offers_by_key = {

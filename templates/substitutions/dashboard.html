@@ -48,7 +48,7 @@
               <span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-exclamation-triangle-fill"></i> {% translate "Not fully covered yet" %}</span>
               {% if absence.pending_offers_count %}
               <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-hourglass-split"></i>
-                {% blocktranslate count counter=absence.pending_offers_count %}{{ counter }} offer sent{% plural %}{{ counter }} offers sent{% endblocktranslate %}
+                {% blocktranslate count counter=absence.pending_offers_count %}{{ counter }} awaiting confirmation{% plural %}{{ counter }} awaiting confirmation{% endblocktranslate %}
               </span>
               {% endif %}
               <a href="{% url 'pick_substitute' absence.id %}">{% translate "choose a substitute" %}</a>

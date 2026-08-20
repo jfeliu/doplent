@@ -70,16 +70,16 @@
               </div>
             </div>
             {% if candidate.already_substituting %}
-            <button type="button" class="btn btn-sm btn-outline-secondary" disabled>{% translate "Offer" %}</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled>{% translate "Choose" %}</button>
             {% elif candidate.offer.status == "pending" %}
-            <button type="button" class="btn btn-sm btn-outline-secondary" disabled>{% translate "Offer sent" %}</button>
+            <button type="button" class="btn btn-sm btn-outline-secondary" disabled>{% translate "Awaiting confirmation" %}</button>
             {% else %}
             <form method="post">
               {% csrf_token %}
               <input type="hidden" name="slot_start" value="{{ slot.start_datetime.isoformat }}">
               <input type="hidden" name="slot_end" value="{{ slot.end_datetime.isoformat }}">
               <input type="hidden" name="substitute_id" value="{{ candidate.pk }}">
-              <button type="submit" class="btn btn-sm btn-primary">{% translate "Offer" %}</button>
+              <button type="submit" class="btn btn-sm btn-primary">{% translate "Choose" %}</button>
             </form>
             {% endif %}
           </li>
