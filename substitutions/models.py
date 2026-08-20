@@ -5,10 +5,18 @@ from teachers.models import Teacher
 
 
 class Absence(models.Model):
+    class Reason(models.TextChoices):
+        SICK_LEAVE = "baixa_it_at", "Baixa IT-AT"
+        PERMITS = "permisos", "Permisos"
+        SCHOOL_ACTIVITY = "activitat_escola", "Activitat Escola"
+        FOUNDATION_ACTIVITY = "activitat_fundacio", "Activitat Fundació"
+
     teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name="absences")
     start_datetime = models.DateTimeField(verbose_name=_("unavailable from"))
     end_datetime = models.DateTimeField(verbose_name=_("unavailable until"))
-    reason = models.CharField(max_length=255, blank=True, verbose_name=_("reason"))
+    reason = models.CharField(
+        max_length=255, choices=Reason.choices, verbose_name=_("reason")
+    )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("created at"))
 
     class Meta:
