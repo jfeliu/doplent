@@ -1,4 +1,4 @@
-{% load i18n ca_dates %}{% blocktranslate with teacher=offer.absence.teacher start=offer.start_datetime|ca_datetime end=offer.end_datetime|ca_datetime %}{{ teacher }} needs a substitute from {{ start }} to {{ end }}.{% endblocktranslate %}
+{% load i18n ca_dates %}{% blocktranslate with teacher=offer.absence.teacher timeframe=offer.start_datetime|ca_timeframe:offer.end_datetime %}{{ teacher }} needs a substitute for {{ timeframe }}.{% endblocktranslate %}
 {% if offer.absence.reason %}
 {% blocktranslate with reason=offer.absence.reason %}Reason: {{ reason }}{% endblocktranslate %}
 {% endif %}

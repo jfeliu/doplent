@@ -3,7 +3,7 @@ import datetime
 from django.contrib.auth.models import Permission, User
 from django.contrib.contenttypes.models import ContentType
 from django.core.files.uploadedfile import SimpleUploadedFile
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from .calendar import LANE_MIN_WIDTH, build_week_calendar
@@ -34,6 +34,7 @@ def add_hours(teacher: Teacher, weekday: int, start: str, end: str, is_paperwork
     )
 
 
+@override_settings(LANGUAGE_CODE="en")
 class ImportTeachersFromCsvTests(TestCase):
     def test_creates_teacher_with_multiple_non_teaching_blocks(self):
         content = (

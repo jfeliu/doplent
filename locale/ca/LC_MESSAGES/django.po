@@ -191,8 +191,8 @@ msgid "choose one"
 msgstr "tria'n un"
 
 #, python-format
-msgid "%(substitute)s (%(start)s &ndash; %(end)s)"
-msgstr "%(substitute)s (%(start)s &ndash; %(end)s)"
+msgid "%(substitute)s (%(timeframe)s)"
+msgstr "%(substitute)s (%(timeframe)s)"
 
 msgid "Not fully covered yet"
 msgstr "Encara no coberta del tot"
@@ -515,8 +515,8 @@ msgid "Back to dashboard"
 msgstr "Torna al tauler"
 
 #, python-format
-msgid "%(teacher)s needs a substitute from %(start)s to %(end)s."
-msgstr "%(teacher)s necessita un/a substitut/a de %(start)s a %(end)s."
+msgid "%(teacher)s needs a substitute for %(timeframe)s."
+msgstr "%(teacher)s necessita un/a substitut/a per a %(timeframe)s."
 
 #, python-format
 msgid "Reason: %(reason)s"
@@ -529,17 +529,17 @@ msgid "A calendar file is attached."
 msgstr "S'adjunta un fitxer de calendari."
 
 #, python-format
-msgid "%(substitute)s will cover your absence from %(start)s to %(end)s."
-msgstr "%(substitute)s cobrirà la teva absència de %(start)s a %(end)s."
+msgid "%(substitute)s will cover your absence for %(timeframe)s."
+msgstr "%(substitute)s cobrirà la teva absència per a %(timeframe)s."
 
 #, python-format
 msgid ""
-"%(teacher)s can't cover your absence from %(start)s to %(end)s. Pick another"
-" substitute from your dashboard."
+"%(teacher)s can't cover your absence for %(timeframe)s. Pick another "
+"substitute from your dashboard."
 msgstr ""
-"%(teacher)s no pot cobrir la teva absència de %(start)s a %(end)s. Tria un "
+"%(teacher)s no pot cobrir la teva absència per a %(timeframe)s. Tria un "
 "altre substitut/a des del teu tauler."
 
 #, python-format
-msgid "You're confirmed to cover for %(teacher)s from %(start)s to %(end)s."
-msgstr "Confirmat: substitueixes %(teacher)s de %(start)s a %(end)s."
+msgid "You're confirmed to cover %(timeframe)s for %(teacher)s."
+msgstr "Confirmat: substitueixes %(teacher)s el %(timeframe)s."

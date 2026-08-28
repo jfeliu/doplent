@@ -72,7 +72,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'django.middleware.locale.LocaleMiddleware',
+    'config.middleware.DefaultToCatalanLocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -135,11 +135,14 @@ AUTH_PASSWORD_VALIDATORS = [
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
 
-LANGUAGE_CODE = 'en'
+# Catalan is the default for every visitor (see
+# config.middleware.DefaultToCatalanLocaleMiddleware); English stays available
+# through the in-app language switcher.
+LANGUAGE_CODE = 'ca'
 
 LANGUAGES = [
-    ('en', 'English'),
     ('ca', 'Català'),
+    ('en', 'English'),
 ]
 
 LOCALE_PATHS = [BASE_DIR / 'locale']

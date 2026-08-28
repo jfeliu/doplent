@@ -20,3 +20,14 @@ def format_ca_date(value):
 def format_ca_datetime(value):
     value = _local(value)
     return f"{format_ca_date(value)} {value:%H:%M}"
+
+
+def format_ca_timeframe(start, end):
+    """A start-end range. When both ends fall on the same day the date is
+    written once: "Dilluns, 31/08/2026 11:00 – 12:00". Otherwise both
+    ends are spelled out in full."""
+    start = _local(start)
+    end = _local(end)
+    if start.date() == end.date():
+        return f"{format_ca_datetime(start)} – {end:%H:%M}"
+    return f"{format_ca_datetime(start)} – {format_ca_datetime(end)}"

@@ -2,7 +2,7 @@ import datetime
 
 from django.contrib.auth.models import User
 from django.core import mail
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -595,6 +595,7 @@ class DiscardedPeriodsTests(TestCase):
         self.assertEqual(discarded_periods(absence), [])
 
 
+@override_settings(LANGUAGE_CODE="en")
 class PickSubstituteViewDiscardedPeriodsTests(TestCase):
     def test_page_shows_discarded_periods_with_reasons(self):
         absent = make_teacher("absent_page_discard", grade_level=Teacher.GradeLevel.PRIMARY)
@@ -696,6 +697,7 @@ class SplitPickSubstituteViewTests(TestCase):
                           [self.first_half.pk, self.second_half.pk])
 
 
+@override_settings(LANGUAGE_CODE="en")
 class PickSubstituteOfferFlowTests(TestCase):
     def setUp(self):
         self.absent = make_teacher("absent_offer_view", grade_level=Teacher.GradeLevel.PRIMARY)
@@ -791,6 +793,7 @@ class PickSubstituteOfferFlowTests(TestCase):
         self.assertNotEqual(offer.status, SubstitutionOffer.Status.PENDING)
 
 
+@override_settings(LANGUAGE_CODE="en")
 class RespondToOfferViewTests(TestCase):
     def setUp(self):
         self.absent = make_teacher("absent_respond", grade_level=Teacher.GradeLevel.PRIMARY, email="absent@example.edu")
@@ -902,6 +905,7 @@ class RespondToOfferViewTests(TestCase):
         self.assertNotContains(response, "name=\"action\" value=\"accept\"")
 
 
+@override_settings(LANGUAGE_CODE="en")
 class DashboardOffersToMeTests(TestCase):
     def test_pending_offer_listed_with_a_link_to_respond(self):
         absent = make_teacher("dashboard_offer_absent")
@@ -950,3 +954,35 @@ class CaDateFormattingTests(TestCase):
 
         self.assertContains(response, "09:00")
         self.assertNotContains(response, "07:00")
+
+    def test_timeframe_collapses_the_date_when_start_and_end_share_a_day(self):
+        from .dates_ca import format_ca_timeframe
+
+        self.assertEqual(
+            format_ca_timeframe(dt(2026, 8, 31, 11), dt(2026, 8, 31, 12)),
+            "Dilluns, 31/08/2026 11:00 – 12:00",
+        )
+
+    def test_timeframe_spells_out_both_ends_when_they_differ(self):
+        from .dates_ca import format_ca_timeframe
+
+        self.assertEqual(
+            format_ca_timeframe(dt(2026, 8, 31, 11), dt(2026, 9, 1, 12)),
+            "Dilluns, 31/08/2026 11:00 – Dimarts, 01/09/2026 12:00",
+        )
+
+
+class DefaultLanguageTests(TestCase):
+    def test_visitors_get_catalan_even_with_an_english_browser(self):
+        response = self.client.get(reverse("login"), HTTP_ACCEPT_LANGUAGE="en-US,en;q=0.9")
+
+        self.assertEqual(response["Content-Language"], "ca")
+        self.assertContains(response, "Inicia la sessió")
+
+    def test_language_switcher_choice_is_honoured(self):
+        self.client.cookies["django_language"] = "en"
+
+        response = self.client.get(reverse("login"))
+
+        self.assertEqual(response["Content-Language"], "en")
+        self.assertContains(response, "Log in")
