@@ -137,6 +137,32 @@ fly ssh console --app <app-name> -C "sh -c \"echo $B64 | base64 -d > /tmp/d.py &
 fly ssh console --app <app-name> -C "python manage.py createsuperuser"
 ```
 
+## 8. Set up continuous deployment (GitHub Actions)
+
+[.github/workflows/fly-deploy.yml](../.github/workflows/fly-deploy.yml) runs
+`flyctl deploy --remote-only` on every push to `main`/`master`. It needs a
+`FLY_API_TOKEN` repository secret - without it, that step fails almost
+instantly (finishes in about a second, no build/upload logs at all) because
+flyctl has nothing to authenticate with and never gets as far as talking to
+Fly.
+
+Generate a token scoped to just this app rather than reusing your personal
+`fly auth token`:
+
+```bash
+fly tokens create deploy --app <app-name> -x 999999h
+```
+
+(`-x` sets a long expiry; omit it and Fly defaults to a short-lived token
+that needs periodic renewal.)
+
+Then in GitHub: **Settings → Secrets and variables → Actions → New repository
+secret**, name it `FLY_API_TOKEN`, and paste the token value.
+
+If a deploy run fails instantly again later, the token likely expired or was
+revoked - regenerate it the same way and update the secret with the new
+value.
+
 ## Notes on the free/low-cost tier
 
 - `auto_stop_machines`/`min_machines_running = 0` in [fly.toml](../fly.toml)
