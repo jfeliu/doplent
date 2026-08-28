@@ -21,6 +21,47 @@ class Teacher(models.Model):
         return self.user.get_full_name() or self.user.username
 
 
+class NonTeachingHoursKind(models.TextChoices):
+    """The kinds of non-teaching time, declared in the default order the
+    substitute-picker prefers to draw a teacher off them (free first, escolta'm
+    last). The actual order is read from NonTeachingHoursPriority at runtime."""
+
+    FREE = "free", _("Free")
+    PAPERWORK = "paperwork", _("Paperwork")
+    CO_TEACHING = "co_teaching", _("Co-teaching")
+    ESCOLTAM = "escoltam", _("Escolta'm")
+
+
+class NonTeachingHoursPriority(models.Model):
+    """How eagerly the substitute-picker pulls a teacher off each kind of
+    non-teaching block. Lower `priority` is drawn from first (free time), higher
+    is a last resort (escolta'm). One row per kind, seeded by migration and
+    editable in the admin so the order can be retuned without a deploy."""
+
+    kind = models.CharField(
+        max_length=20, choices=NonTeachingHoursKind.choices, unique=True, verbose_name=_("kind")
+    )
+    priority = models.PositiveIntegerField(
+        verbose_name=_("priority"), help_text=_("Lower is pulled first.")
+    )
+
+    class Meta:
+        ordering = ["priority"]
+        verbose_name = _("non-teaching hours priority")
+        verbose_name_plural = _("non-teaching hours priorities")
+
+    def __str__(self):
+        return f"{self.get_kind_display()} ({self.priority})"
+
+    @classmethod
+    def ordering_map(cls) -> dict[str, int]:
+        """`kind -> priority` for every kind. Any kind without a row falls to the
+        end, so an unconfigured kind is treated as the least preferred."""
+        configured = dict(cls.objects.values_list("kind", "priority"))
+        fallback = max(configured.values(), default=0) + 1
+        return {kind: configured.get(kind, fallback) for kind in NonTeachingHoursKind.values}
+
+
 class WeeklyNonTeachingHours(models.Model):
     """A recurring block of time each week when a teacher is at school but not
     teaching a class (a free period) - and so could potentially cover for
@@ -39,10 +80,11 @@ class WeeklyNonTeachingHours(models.Model):
     weekday = models.IntegerField(choices=Weekday.choices, verbose_name=_("weekday"))
     start_time = models.TimeField(verbose_name=_("start time"))
     end_time = models.TimeField(verbose_name=_("end time"))
-    is_paperwork = models.BooleanField(
-        default=False,
-        verbose_name=_("paperwork"),
-        help_text=_("Reserved for paperwork/admin work, as opposed to fully free time."),
+    kind = models.CharField(
+        max_length=20,
+        choices=NonTeachingHoursKind.choices,
+        default=NonTeachingHoursKind.FREE,
+        verbose_name=_("kind"),
     )
 
     class Meta:

@@ -7,7 +7,7 @@ from .models import WeeklyNonTeachingHours
 class NonTeachingHoursForm(forms.ModelForm):
     class Meta:
         model = WeeklyNonTeachingHours
-        fields = ["weekday", "start_time", "end_time", "is_paperwork"]
+        fields = ["weekday", "start_time", "end_time", "kind"]
         widgets = {
             "start_time": forms.TimeInput(attrs={"type": "time"}),
             "end_time": forms.TimeInput(attrs={"type": "time"}),

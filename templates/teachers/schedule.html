@@ -4,12 +4,13 @@
 {% block content %}
 <h1 class="h4 mb-2"><i class="bi bi-clock text-primary me-1"></i>{% translate "My weekly non-teaching hours" %}</h1>
 <p class="text-muted">
-  {% blocktranslate %}
-  List the recurring times each week when you're at school but not teaching a class
-  (free periods). Those are the only times you can be suggested as a substitute.
-  Check "Paperwork" for blocks reserved for admin work - you'll still be
-  suggested during those, but only after teachers who have nothing else to do.
-  Leave a row's day blank and it will be ignored; check "Delete" to remove a row.
+  {% blocktranslate trimmed %}
+  List the recurring times each week when you're at school but not teaching a class.
+  Those are the only times you can be suggested as a substitute. Set each block's
+  type - free, paperwork, co-teaching or escolta'm: you'll still be suggested
+  during any of them, but the picker draws teachers off free time first and
+  escolta'm last. Leave a row's day blank and it will be ignored; check "Delete"
+  to remove a row.
   {% endblocktranslate %}
 </p>
 <div class="card">
@@ -29,7 +30,7 @@
               <th>{% translate "Day" %}</th>
               <th>{% translate "Free from" %}</th>
               <th>{% translate "Free until" %}</th>
-              <th>{% translate "Paperwork" %}</th>
+              <th>{% translate "Type" %}</th>
               <th>{% translate "Delete" %}</th>
             </tr>
           </thead>
@@ -39,7 +40,7 @@
               <td>{{ form.id }}{{ form.weekday }}{{ form.non_field_errors }}</td>
               <td>{{ form.start_time }}</td>
               <td>{{ form.end_time }}</td>
-              <td>{{ form.is_paperwork }}</td>
+              <td>{{ form.kind }}</td>
               <td>{% if form.instance.pk %}{{ form.DELETE }}{% endif %}</td>
             </tr>
             {% endfor %}

@@ -8,7 +8,7 @@ from django.urls import reverse
 
 from .calendar import LANE_MIN_WIDTH, build_week_calendar
 from .importer import import_teachers_from_csv
-from .models import Teacher, WeeklyNonTeachingHours
+from .models import NonTeachingHoursKind, Teacher, WeeklyNonTeachingHours
 
 
 def csv_file(content: str) -> SimpleUploadedFile:
@@ -22,7 +22,7 @@ def make_teacher(first_name: str, last_name: str, active: bool = True) -> Teache
     return Teacher.objects.create(user=user, grade_level=Teacher.GradeLevel.PRIMARY, active=active)
 
 
-def add_hours(teacher: Teacher, weekday: int, start: str, end: str, is_paperwork: bool = False):
+def add_hours(teacher: Teacher, weekday: int, start: str, end: str, kind: str = NonTeachingHoursKind.FREE):
     start_hour, start_minute = (int(part) for part in start.split(":"))
     end_hour, end_minute = (int(part) for part in end.split(":"))
     return WeeklyNonTeachingHours.objects.create(
@@ -30,7 +30,7 @@ def add_hours(teacher: Teacher, weekday: int, start: str, end: str, is_paperwork
         weekday=weekday,
         start_time=datetime.time(start_hour, start_minute),
         end_time=datetime.time(end_hour, end_minute),
-        is_paperwork=is_paperwork,
+        kind=kind,
     )
 
 
@@ -134,22 +134,64 @@ class ImportTeachersFromCsvTests(TestCase):
         self.assertEqual(existing.first_name, "Original")
         self.assertTrue(Teacher.objects.filter(user=existing).exists())
 
-    def test_is_paperwork_column_sets_flag_per_block(self):
+    def test_type_column_sets_kind_per_block(self):
         content = (
-            "first_name,last_name,email,grade_level,weekday,start_time,end_time,is_paperwork\n"
-            "Jane,Doe,,primary,Monday,08:00,09:30,yes\n"
-            "Jane,Doe,,primary,Monday,13:00,16:00,no\n"
+            "first_name,last_name,email,grade_level,weekday,start_time,end_time,type\n"
+            "Jane,Doe,,primary,Monday,08:00,09:30,paperwork\n"
+            "Jane,Doe,,primary,Monday,10:00,12:00,co_teaching\n"
+            "Jane,Doe,,primary,Monday,13:00,16:00,free\n"
         )
         result = import_teachers_from_csv(csv_file(content))
 
         self.assertTrue(result.ok)
         teacher = Teacher.objects.get(user__username="jane.doe")
-        paperwork_block = teacher.non_teaching_hours.get(start_time=datetime.time(8, 0))
-        free_block = teacher.non_teaching_hours.get(start_time=datetime.time(13, 0))
-        self.assertTrue(paperwork_block.is_paperwork)
-        self.assertFalse(free_block.is_paperwork)
+        self.assertEqual(
+            teacher.non_teaching_hours.get(start_time=datetime.time(8, 0)).kind,
+            NonTeachingHoursKind.PAPERWORK,
+        )
+        self.assertEqual(
+            teacher.non_teaching_hours.get(start_time=datetime.time(10, 0)).kind,
+            NonTeachingHoursKind.CO_TEACHING,
+        )
+        self.assertEqual(
+            teacher.non_teaching_hours.get(start_time=datetime.time(13, 0)).kind,
+            NonTeachingHoursKind.FREE,
+        )
 
-    def test_missing_is_paperwork_column_defaults_to_false(self):
+    def test_non_utf8_file_is_decoded_not_crashed(self):
+        # Excel on Windows saves accented names as cp1252 - "Monclús" there is
+        # ...0xfa, which is not valid UTF-8.
+        content = (
+            "first_name,last_name,email,grade_level,weekday,start_time,end_time,type\n"
+            "Jana,Monclús,jana@example.edu,pre_primary,Monday,09:00,10:00,free\n"
+        )
+        upload = SimpleUploadedFile("teachers.csv", content.encode("cp1252"), content_type="text/csv")
+
+        result = import_teachers_from_csv(upload)
+
+        self.assertTrue(result.ok)
+        self.assertTrue(Teacher.objects.filter(user__last_name="Monclús").exists())
+
+    def test_type_accepts_catalan_aliases(self):
+        content = (
+            "first_name,last_name,email,grade_level,weekday,start_time,end_time,type\n"
+            "Jane,Doe,,primary,Monday,08:00,09:30,càrrec\n"
+            "Jane,Doe,,primary,Monday,10:00,12:00,Escolta'm\n"
+        )
+        result = import_teachers_from_csv(csv_file(content))
+
+        self.assertTrue(result.ok)
+        teacher = Teacher.objects.get(user__username="jane.doe")
+        self.assertEqual(
+            teacher.non_teaching_hours.get(start_time=datetime.time(8, 0)).kind,
+            NonTeachingHoursKind.PAPERWORK,
+        )
+        self.assertEqual(
+            teacher.non_teaching_hours.get(start_time=datetime.time(10, 0)).kind,
+            NonTeachingHoursKind.ESCOLTAM,
+        )
+
+    def test_missing_type_column_defaults_to_free(self):
         content = (
             "first_name,last_name,email,grade_level,weekday,start_time,end_time\n"
             "Jane,Doe,,primary,Monday,08:00,09:30\n"
@@ -158,19 +200,19 @@ class ImportTeachersFromCsvTests(TestCase):
 
         self.assertTrue(result.ok)
         block = WeeklyNonTeachingHours.objects.get(teacher__user__username="jane.doe")
-        self.assertFalse(block.is_paperwork)
+        self.assertEqual(block.kind, NonTeachingHoursKind.FREE)
 
-    def test_invalid_is_paperwork_value_reported(self):
+    def test_invalid_type_value_reported(self):
         content = (
-            "first_name,last_name,email,grade_level,weekday,start_time,end_time,is_paperwork\n"
+            "first_name,last_name,email,grade_level,weekday,start_time,end_time,type\n"
             "Jane,Doe,,primary,Monday,08:00,09:30,maybe\n"
         )
         result = import_teachers_from_csv(csv_file(content))
 
         self.assertFalse(result.ok)
-        self.assertIn("is_paperwork", result.errors[0].message)
+        self.assertIn("type", result.errors[0].message)
 
-    def test_conflicting_is_paperwork_for_same_block_rolls_back(self):
+    def test_conflicting_type_for_same_block_rolls_back(self):
         WeeklyNonTeachingHours.objects.create(
             teacher=Teacher.objects.create(
                 user=User.objects.create_user(username="jane.doe"),
@@ -179,11 +221,11 @@ class ImportTeachersFromCsvTests(TestCase):
             weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
             start_time=datetime.time(8, 0),
             end_time=datetime.time(9, 30),
-            is_paperwork=False,
+            kind=NonTeachingHoursKind.FREE,
         )
         content = (
-            "first_name,last_name,email,grade_level,weekday,start_time,end_time,is_paperwork\n"
-            "Jane,Doe,,primary,Monday,08:00,09:30,yes\n"
+            "first_name,last_name,email,grade_level,weekday,start_time,end_time,type\n"
+            "Jane,Doe,,primary,Monday,08:00,09:30,paperwork\n"
         )
         result = import_teachers_from_csv(csv_file(content))
 

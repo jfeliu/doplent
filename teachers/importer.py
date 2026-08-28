@@ -9,7 +9,7 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
-from .models import Teacher, WeeklyNonTeachingHours
+from .models import NonTeachingHoursKind, Teacher, WeeklyNonTeachingHours
 
 REQUIRED_COLUMNS = {"first_name", "last_name", "grade_level"}
 
@@ -23,15 +23,31 @@ WEEKDAY_ALIASES = {
     "sunday": 6, "sun": 6,
 }
 
-TRUE_VALUES = {"true", "yes", "y", "1"}
-FALSE_VALUES = {"false", "no", "n", "0", ""}
+# Accepts the stored codes plus common english/catalan spellings. A blank cell
+# (or no `type` column at all) means free time.
+KIND_ALIASES = {
+    "": NonTeachingHoursKind.FREE,
+    "free": NonTeachingHoursKind.FREE,
+    "lliure": NonTeachingHoursKind.FREE,
+    "paperwork": NonTeachingHoursKind.PAPERWORK,
+    "carrec": NonTeachingHoursKind.PAPERWORK,
+    "càrrec": NonTeachingHoursKind.PAPERWORK,
+    "co_teaching": NonTeachingHoursKind.CO_TEACHING,
+    "co-teaching": NonTeachingHoursKind.CO_TEACHING,
+    "coteaching": NonTeachingHoursKind.CO_TEACHING,
+    "codocencia": NonTeachingHoursKind.CO_TEACHING,
+    "codocència": NonTeachingHoursKind.CO_TEACHING,
+    "escoltam": NonTeachingHoursKind.ESCOLTAM,
+    "escolta'm": NonTeachingHoursKind.ESCOLTAM,
+    "escolta_m": NonTeachingHoursKind.ESCOLTAM,
+}
 
 CSV_TEMPLATE = (
-    "first_name,last_name,email,grade_level,weekday,start_time,end_time,is_paperwork\n"
-    "Jane,Doe,jane.doe@example.edu,primary,Monday,08:00,09:30,no\n"
-    "Jane,Doe,jane.doe@example.edu,primary,Monday,13:00,16:00,yes\n"
-    "Jane,Doe,jane.doe@example.edu,primary,Wednesday,08:00,12:00,no\n"
-    "John,Smith,john.smith@example.edu,pre_primary,Tuesday,09:00,10:00,no\n"
+    "first_name,last_name,email,grade_level,weekday,start_time,end_time,type\n"
+    "Jane,Doe,jane.doe@example.edu,primary,Monday,08:00,09:30,free\n"
+    "Jane,Doe,jane.doe@example.edu,primary,Monday,13:00,16:00,paperwork\n"
+    "Jane,Doe,jane.doe@example.edu,primary,Wednesday,08:00,12:00,co_teaching\n"
+    "John,Smith,john.smith@example.edu,pre_primary,Tuesday,09:00,10:00,escoltam\n"
 )
 
 
@@ -72,13 +88,14 @@ def _parse_time(raw: str):
     raise ValueError(_("unrecognized time '%(value)s', expected HH:MM") % {"value": raw})
 
 
-def _parse_bool(raw: str) -> bool:
+def _parse_kind(raw: str) -> str:
     normalized = raw.strip().lower()
-    if normalized in TRUE_VALUES:
-        return True
-    if normalized in FALSE_VALUES:
-        return False
-    raise ValueError(_("unrecognized is_paperwork value '%(value)s', expected yes/no") % {"value": raw})
+    if normalized in KIND_ALIASES:
+        return KIND_ALIASES[normalized]
+    raise ValueError(
+        _("unrecognized type '%(value)s', expected one of %(choices)s")
+        % {"value": raw, "choices": ", ".join(NonTeachingHoursKind.values)}
+    )
 
 
 def _generate_password() -> str:
@@ -100,7 +117,7 @@ def _process_row(row: dict, result: ImportResult) -> None:
     weekday_raw = (row.get("weekday") or "").strip()
     start_raw = (row.get("start_time") or "").strip()
     end_raw = (row.get("end_time") or "").strip()
-    paperwork_raw = row.get("is_paperwork") or ""
+    kind_raw = row.get("type") or ""
 
     if not first_name or not last_name:
         raise ValueError(_("first_name and last_name are required"))
@@ -135,7 +152,7 @@ def _process_row(row: dict, result: ImportResult) -> None:
         weekday = _parse_weekday(weekday_raw)
         start_time = _parse_time(start_raw)
         end_time = _parse_time(end_raw)
-        is_paperwork = _parse_bool(paperwork_raw)
+        kind = _parse_kind(kind_raw)
         if end_time <= start_time:
             raise ValueError(_("end_time must be after start_time"))
         block, created = WeeklyNonTeachingHours.objects.get_or_create(
@@ -143,15 +160,28 @@ def _process_row(row: dict, result: ImportResult) -> None:
             weekday=weekday,
             start_time=start_time,
             end_time=end_time,
-            defaults={"is_paperwork": is_paperwork},
+            defaults={"kind": kind},
         )
         if created:
             result.hours_created += 1
-        elif block.is_paperwork != is_paperwork:
+        elif block.kind != kind:
             raise ValueError(
-                _("is_paperwork for %(username)s's %(start)s-%(end)s block conflicts with the existing value")
+                _("type for %(username)s's %(start)s-%(end)s block conflicts with the existing value")
                 % {"username": username, "start": start_raw, "end": end_raw}
             )
+
+
+def _decode(raw: bytes) -> str | None:
+    """Decode uploaded CSV bytes. Tries UTF-8 (the template's encoding), then
+    Windows-1252, which is what Excel on Windows produces for Western European
+    text - so a file with accented names like "Monclús" still imports. Returns
+    None if neither fits."""
+    for encoding in ("utf-8-sig", "cp1252"):
+        try:
+            return raw.decode(encoding)
+        except UnicodeDecodeError:
+            continue
+    return None
 
 
 def import_teachers_from_csv(uploaded_file) -> ImportResult:
@@ -165,7 +195,10 @@ def import_teachers_from_csv(uploaded_file) -> ImportResult:
     blocks are left as-is rather than duplicated. If any row fails validation,
     nothing is saved."""
     result = ImportResult()
-    content = uploaded_file.read().decode("utf-8-sig")
+    content = _decode(uploaded_file.read())
+    if content is None:
+        result.errors.append(RowError(0, str(_("Could not read the file - save it as UTF-8 CSV and try again."))))
+        return result
     reader = csv.DictReader(io.StringIO(content))
 
     fieldnames = {name.strip() for name in (reader.fieldnames or [])}

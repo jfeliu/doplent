@@ -57,10 +57,6 @@ msgstr "dia de la setmana no reconegut '%(value)s'"
 msgid "unrecognized time '%(value)s', expected HH:MM"
 msgstr "hora no reconeguda '%(value)s', s'esperava HH:MM"
 
-#, python-format
-msgid "unrecognized is_paperwork value '%(value)s', expected yes/no"
-msgstr "valor d'is_paperwork no reconegut '%(value)s', s'esperava yes/no"
-
 msgid "username is required"
 msgstr "el nom d'usuari és obligatori"
 
@@ -81,14 +77,6 @@ msgstr ""
 
 msgid "end_time must be after start_time"
 msgstr "end_time ha de ser posterior a start_time"
-
-#, python-format
-msgid ""
-"is_paperwork for %(username)s's %(start)s-%(end)s block conflicts with the "
-"existing value"
-msgstr ""
-"is_paperwork del bloc %(start)s-%(end)s de %(username)s entra en conflicte "
-"amb el valor existent"
 
 #, python-format
 msgid "CSV must include columns: %(columns)s"
@@ -141,13 +129,6 @@ msgstr "hora d'inici"
 
 msgid "end time"
 msgstr "hora de fi"
-
-msgid "paperwork"
-msgstr "càrrec"
-
-msgid "Reserved for paperwork/admin work, as opposed to fully free time."
-msgstr ""
-"Reservat per a tasques administratives, en lloc de temps totalment lliure."
 
 msgid "weekly non-teaching hours"
 msgstr "hores setmanals sense docència"
@@ -226,9 +207,6 @@ msgstr "Cobrint"
 
 msgid "Free"
 msgstr "Lliure"
-
-msgid "Has paperwork time"
-msgstr "Té càrrec"
 
 msgid "Different grade"
 msgstr "Etapa educativa diferent"
@@ -368,19 +346,6 @@ msgstr "Les meves hores sense docència"
 
 msgid "My weekly non-teaching hours"
 msgstr "Les meves hores setmanals sense docència"
-
-msgid ""
-"\n"
-"  List the recurring times each week when you're at school but not teaching a class\n"
-"  (free periods). Those are the only times you can be suggested as a substitute.\n"
-"  Check \"Paperwork\" for blocks reserved for admin work - you'll still be\n"
-"  suggested during those, but only after teachers who have nothing else to do.\n"
-"  Leave a row's day blank and it will be ignored; check \"Delete\" to remove a row.\n"
-"  "
-msgstr ""
-"\n"
-"  Indica les hores recurrents de cada setmana en què ets al centre però no fas classe (hores lliures). Només en aquestes hores se't pot proposar com a substitut/a. Marca \"Càrrec\" en els blocs reservats per a tasques administratives - encara se't podrà proposar en aquests blocs, però només després dels docents que no tenen res més a fer. Deixa el dia d'una fila en blanc perquè s'ignori; marca \"Elimina\" per suprimir una fila.\n"
-"  "
 
 msgid "Day"
 msgstr "Dia"
@@ -543,3 +508,71 @@ msgstr ""
 #, python-format
 msgid "You're confirmed to cover %(timeframe)s for %(teacher)s."
 msgstr "Confirmat: substitueixes %(teacher)s el %(timeframe)s."
+
+msgid "Co-teaching"
+msgstr "Codocència"
+
+msgid "Escolta'm"
+msgstr "Escolta'm"
+
+msgid "kind"
+msgstr "tipus"
+
+msgid "priority"
+msgstr "prioritat"
+
+msgid "Lower is pulled first."
+msgstr "El número més baix es prioritza."
+
+msgid "non-teaching hours priority"
+msgstr "prioritat d'hores sense docència"
+
+msgid "non-teaching hours priorities"
+msgstr "prioritats d'hores sense docència"
+
+msgid "Type"
+msgstr "Tipus"
+
+msgid "unrecognized type '%(value)s', expected one of %(choices)s"
+msgstr "tipus no reconegut '%(value)s', s'esperava un de: %(choices)s"
+
+msgid ""
+"type for %(username)s's %(start)s-%(end)s block conflicts with the existing "
+"value"
+msgstr ""
+"el tipus del bloc %(start)s-%(end)s de %(username)s entra en conflicte amb "
+"el valor existent"
+
+msgid "Not fully free (paperwork, co-teaching or escolta'm)"
+msgstr "No del tot lliure (càrrec, codocència o escolta'm)"
+
+msgid ""
+"List the recurring times each week when you're at school but not teaching a "
+"class. Those are the only times you can be suggested as a substitute. Set "
+"each block's type - free, paperwork, co-teaching or escolta'm: you'll still "
+"be suggested during any of them, but the picker draws teachers off free time"
+" first and escolta'm last. Leave a row's day blank and it will be ignored; "
+"check \"Delete\" to remove a row."
+msgstr ""
+"Indica les hores recurrents de cada setmana en què ets al centre però no fas"
+" classe. Només en aquestes hores se't pot proposar com a substitut/a. "
+"Defineix el tipus de cada bloc - lliure, càrrec, codocència o escolta'm: "
+"se't podrà proposar en qualsevol, però primer es tira dels docents que tenen"
+" hores lliures i, en últim lloc, dels que fan escolta'm. Deixa el dia d'una "
+"fila en blanc perquè s'ignori; marca \"Elimina\" per suprimir una fila."
+
+msgid ""
+"Every active teacher's recurring non-teaching periods, across the school "
+"week. Each block is a period when that teacher is at school but not teaching"
+" - the pool substitutions are drawn from. Striped blocks are not fully free "
+"(paperwork, co-teaching or escolta'm); hover a block for its type."
+msgstr ""
+"Les hores sense docència recurrents de cada docent actiu, al llarg de la "
+"setmana escolar. Cada bloc és una estona en què el docent és al centre però "
+"no fa classe - la reserva d'on surten les substitucions. Els blocs ratllats "
+"no són del tot lliures (càrrec, codocència o escolta'm); passa el cursor per"
+" veure'n el tipus."
+
+msgid "Could not read the file - save it as UTF-8 CSV and try again."
+msgstr ""
+"No s'ha pogut llegir el fitxer; desa'l com a CSV UTF-8 i torna-ho a provar."

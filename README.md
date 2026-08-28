@@ -93,10 +93,10 @@ teacher's name across rows to give them several blocks, or leave the
 weekday/time columns blank to register a teacher with no hours yet.
 
 ```csv
-first_name,last_name,email,grade_level,weekday,start_time,end_time,is_paperwork
-Jane,Doe,jane.doe@example.edu,primary,Monday,08:00,09:30,no
-Jane,Doe,jane.doe@example.edu,primary,Monday,13:00,16:00,yes
-John,Smith,john.smith@example.edu,pre_primary,Tuesday,09:00,10:00,no
+first_name,last_name,email,grade_level,weekday,start_time,end_time,type
+Jane,Doe,jane.doe@example.edu,primary,Monday,08:00,09:30,free
+Jane,Doe,jane.doe@example.edu,primary,Monday,13:00,16:00,paperwork
+John,Smith,john.smith@example.edu,pre_primary,Tuesday,09:00,10:00,escoltam
 ```
 
 See [teachers_template.csv](teachers_template.csv) (also downloadable from the
@@ -105,6 +105,10 @@ import page). Details:
 - `grade_level` must be `primary` or `pre_primary`.
 - `weekday` accepts names, abbreviations (`Mon`, `Tue`, …) or `0`–`6` with
   Monday as `0`. Times are `HH:MM` or `HH:MM:SS`.
+- `type` is one of `free`, `paperwork`, `co_teaching`, `escoltam` (english or
+  catalan spellings accepted); blank or no column means `free`. The
+  substitute-picker draws teachers off `free` time first and `escoltam` last —
+  the order is set in the admin under **Non-teaching hours priorities**.
 - Usernames are derived from the name, lowercase and dot-separated
   (`Jane Doe` → `jane.doe`). Generated passwords for newly created users are
   shown once on the results page — save them then.

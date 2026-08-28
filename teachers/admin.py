@@ -7,12 +7,25 @@ from django.shortcuts import render
 from .calendar import build_week_calendar
 from .forms import TeacherCSVImportForm
 from .importer import CSV_TEMPLATE, import_teachers_from_csv
-from .models import Teacher, WeeklyNonTeachingHours
+from .models import NonTeachingHoursPriority, Teacher, WeeklyNonTeachingHours
 
 
 class WeeklyNonTeachingHoursInline(admin.TabularInline):
     model = WeeklyNonTeachingHours
     extra = 2
+
+
+@admin.register(NonTeachingHoursPriority)
+class NonTeachingHoursPriorityAdmin(admin.ModelAdmin):
+    list_display = ["kind", "priority"]
+    list_editable = ["priority"]
+    ordering = ["priority"]
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_delete_permission(self, request, obj=None):
+        return False
 
 
 @admin.register(Teacher)

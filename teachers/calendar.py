@@ -3,7 +3,7 @@ as a week-calendar grid (CSS-positioned blocks, like a typical calendar UI)."""
 from dataclasses import dataclass
 from datetime import time
 
-from .models import WeeklyNonTeachingHours
+from .models import NonTeachingHoursKind, WeeklyNonTeachingHours
 
 PALETTE = [
     "#4f46e5", "#0891b2", "#059669", "#d97706", "#dc2626",
@@ -33,7 +33,8 @@ def _minutes(t: time) -> int:
 @dataclass
 class Block:
     teacher_name: str
-    is_paperwork: bool
+    kind: str
+    kind_label: str
     start: time
     end: time
     color: str
@@ -137,7 +138,8 @@ def _layout_day(entries, day_start, total_range, colors) -> tuple[list[Block], i
         blocks.append(
             Block(
                 teacher_name=str(entry.teacher),
-                is_paperwork=entry.is_paperwork,
+                kind=entry.kind,
+                kind_label=str(NonTeachingHoursKind(entry.kind).label),
                 start=entry.start_time,
                 end=entry.end_time,
                 color=colors[entry.teacher_id],

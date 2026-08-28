@@ -56,7 +56,7 @@
     font-size: .7rem;
     line-height: 1.25;
   }
-  .calendar-block.paperwork {
+  .calendar-block.non-free {
     border-left-style: dashed;
     background: repeating-linear-gradient(
       45deg,
@@ -86,7 +86,7 @@
   .calendar-legend { margin-top: .75rem; font-size: .8rem; color: var(--body-quiet-color); display: flex; align-items: center; gap: 1.5em; flex-wrap: wrap; }
   .calendar-legend-teachers { gap: 1em; }
   .calendar-legend-swatch { display: inline-block; width: .9em; height: .9em; border-radius: 3px; vertical-align: -.15em; margin-right: .35em; }
-  .calendar-legend-swatch.paperwork {
+  .calendar-legend-swatch.non-free {
     background: repeating-linear-gradient(
       45deg,
       var(--body-quiet-color),
@@ -101,11 +101,11 @@
 
 {% block content %}
 <p class="calendar-intro">
-  {% blocktranslate %}
-  Every active teacher's recurring free periods, across the school week.
+  {% blocktranslate trimmed %}
+  Every active teacher's recurring non-teaching periods, across the school week.
   Each block is a period when that teacher is at school but not teaching -
-  the pool substitutions are drawn from. Striped blocks are reserved for
-  paperwork.
+  the pool substitutions are drawn from. Striped blocks are not fully free
+  (paperwork, co-teaching or escolta'm); hover a block for its type.
   {% endblocktranslate %}
 </p>
 
@@ -132,9 +132,9 @@
         <div class="calendar-gridline" style="top: {{ hour.top }}%;"></div>
         {% endfor %}
         {% for block in day.blocks %}
-        <div class="calendar-block{% if block.is_paperwork %} paperwork{% endif %}{% if block.inline %} inline{% endif %}"
+        <div class="calendar-block{% if block.kind != 'free' %} non-free{% endif %}{% if block.inline %} inline{% endif %}"
              style="top: {{ block.top }}%; height: {{ block.height }}%; left: {{ block.left }}%; width: {{ block.width }}%; --block-color: {{ block.color }};"
-             title="{{ block.teacher_name }} ({{ block.start|time:'H:i' }}–{{ block.end|time:'H:i' }})">
+             title="{{ block.teacher_name }} · {{ block.kind_label }} ({{ block.start|time:'H:i' }}–{{ block.end|time:'H:i' }})">
           <span class="calendar-block-teacher{% if block.wrap %} wrap{% endif %}">{{ block.teacher_name }}</span>
           {% if block.show_time %}
           <span class="calendar-block-time">{{ block.start|time:"H:i" }}–{{ block.end|time:"H:i" }}</span>
@@ -157,6 +157,6 @@
 {% endif %}
 
 <div class="calendar-legend">
-  <span><span class="calendar-legend-swatch paperwork"></span>{% translate "Reserved for paperwork" %}</span>
+  <span><span class="calendar-legend-swatch non-free"></span>{% translate "Not fully free (paperwork, co-teaching or escolta'm)" %}</span>
 </div>
 {% endblock %}

@@ -6,7 +6,7 @@ from django.test import TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from teachers.models import Teacher, WeeklyNonTeachingHours
+from teachers.models import NonTeachingHoursKind, NonTeachingHoursPriority, Teacher, WeeklyNonTeachingHours
 
 from .models import Absence, Substitution, SubstitutionOffer
 from .services import build_coverage_plan, discarded_periods, find_available_substitutes, uncovered_ranges
@@ -38,7 +38,7 @@ def next_monday_dt(hour, minute=0):
 
 
 def result_for(results, teacher):
-    """find_available_substitutes returns fresh instances with has_nothing_to_do
+    """find_available_substitutes returns fresh instances with ranking attributes
     set on them; look up the one matching `teacher` by pk instead of relying on
     object identity."""
     return next(candidate for candidate in results if candidate.pk == teacher.pk)
@@ -221,12 +221,12 @@ class FindAvailableSubstitutesTests(TestCase):
             weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
             start_time=datetime.time(8, 0),
             end_time=datetime.time(16, 0),
-            is_paperwork=True,
+            kind=NonTeachingHoursKind.PAPERWORK,
         )
 
         results = find_available_substitutes(self.absence)
         self.assertIn(candidate, results)
-        self.assertFalse(result_for(results, candidate).has_nothing_to_do)
+        self.assertFalse(result_for(results, candidate).is_fully_free)
 
     def test_free_candidate_ranked_above_paperwork_candidate_despite_more_substitutions(self):
         # busy_but_free has done more substitutions but is truly idle for the
@@ -241,7 +241,7 @@ class FindAvailableSubstitutesTests(TestCase):
             weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
             start_time=datetime.time(8, 0),
             end_time=datetime.time(16, 0),
-            is_paperwork=True,
+            kind=NonTeachingHoursKind.PAPERWORK,
         )
 
         past_absent = make_teacher("past_absent_2")
@@ -256,31 +256,83 @@ class FindAvailableSubstitutesTests(TestCase):
 
         results = find_available_substitutes(self.absence)
         self.assertLess(results.index(busy_but_free), results.index(paperwork_light))
-        self.assertTrue(result_for(results, busy_but_free).has_nothing_to_do)
-        self.assertFalse(result_for(results, paperwork_light).has_nothing_to_do)
+        self.assertTrue(result_for(results, busy_but_free).is_fully_free)
+        self.assertFalse(result_for(results, paperwork_light).is_fully_free)
 
-    def test_mixed_paperwork_and_free_blocks_prefer_only_when_fully_non_paperwork_covers(self):
-        # Free (non-paperwork) 8-9:30, paperwork 9:30-16: the 9-11 request needs
-        # both blocks to be covered at all, so paperwork time was involved.
+    def test_kind_priority_orders_free_then_co_teaching_then_escoltam(self):
+        # Three otherwise-identical candidates whose only block over the window
+        # differs by kind - they should come back free, then co-teaching, then
+        # escolta'm.
+        by_kind = {}
+        for name, kind in [
+            ("free_cand", NonTeachingHoursKind.FREE),
+            ("coteach_cand", NonTeachingHoursKind.CO_TEACHING),
+            ("escoltam_cand", NonTeachingHoursKind.ESCOLTAM),
+        ]:
+            teacher = make_teacher(name)
+            WeeklyNonTeachingHours.objects.create(
+                teacher=teacher,
+                weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+                start_time=datetime.time(8, 0),
+                end_time=datetime.time(16, 0),
+                kind=kind,
+            )
+            by_kind[name] = teacher
+
+        results = find_available_substitutes(self.absence)
+        self.assertLess(results.index(by_kind["free_cand"]), results.index(by_kind["coteach_cand"]))
+        self.assertLess(results.index(by_kind["coteach_cand"]), results.index(by_kind["escoltam_cand"]))
+
+    def test_priorities_are_seeded_by_migration(self):
+        self.assertEqual(
+            NonTeachingHoursPriority.ordering_map(),
+            {"free": 0, "paperwork": 10, "co_teaching": 20, "escoltam": 30},
+        )
+
+    def test_reordering_priorities_changes_the_ranking(self):
+        first = make_teacher("was_free")
+        WeeklyNonTeachingHours.objects.create(
+            teacher=first,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(8, 0),
+            end_time=datetime.time(16, 0),
+            kind=NonTeachingHoursKind.FREE,
+        )
+        second = make_teacher("was_paperwork")
+        WeeklyNonTeachingHours.objects.create(
+            teacher=second,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(8, 0),
+            end_time=datetime.time(16, 0),
+            kind=NonTeachingHoursKind.PAPERWORK,
+        )
+        NonTeachingHoursPriority.objects.filter(kind=NonTeachingHoursKind.FREE).update(priority=99)
+
+        results = find_available_substitutes(self.absence)
+        self.assertLess(results.index(second), results.index(first))
+
+    def test_mixed_kind_blocks_rank_by_the_worst_kind_needed(self):
+        # Free 8-9:30, paperwork 9:30-16: the 9-11 request needs both blocks to
+        # be covered at all, so paperwork time was involved.
         candidate = make_teacher("mixed_blocks")
         WeeklyNonTeachingHours.objects.create(
             teacher=candidate,
             weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
             start_time=datetime.time(8, 0),
             end_time=datetime.time(9, 30),
-            is_paperwork=False,
+            kind=NonTeachingHoursKind.FREE,
         )
         WeeklyNonTeachingHours.objects.create(
             teacher=candidate,
             weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
             start_time=datetime.time(9, 30),
             end_time=datetime.time(16, 0),
-            is_paperwork=True,
+            kind=NonTeachingHoursKind.PAPERWORK,
         )
 
         results = find_available_substitutes(self.absence)
         self.assertIn(candidate, results)
-        self.assertFalse(result_for(results, candidate).has_nothing_to_do)
+        self.assertFalse(result_for(results, candidate).is_fully_free)
 
     def test_requester_own_non_teaching_block_excluded_from_coverage_need(self):
         # The absent teacher has a personal free block 9:30-10 within the

@@ -3,7 +3,7 @@ from datetime import date, datetime, time, timedelta
 from django.db.models import Count
 from django.utils import timezone
 
-from teachers.models import Teacher
+from teachers.models import NonTeachingHoursKind, NonTeachingHoursPriority, Teacher
 
 from .models import Absence, Substitution
 
@@ -83,10 +83,15 @@ def _outside_working_hours(start_dt, end_dt) -> list[tuple[datetime, datetime]]:
     return intervals
 
 
-def _blocks_by_weekday(candidate: Teacher, only_non_paperwork: bool = False) -> dict[int, list[tuple[time, time]]]:
+def _blocks_by_weekday(
+    candidate: Teacher, ceiling: int | None = None, priority_by_kind: dict[str, int] | None = None
+) -> dict[int, list[tuple[time, time]]]:
+    """The candidate's non-teaching blocks grouped by weekday. With `ceiling`
+    set, blocks whose kind ranks worse than that priority are left out - used to
+    ask "could they still cover this drawing only on their more-available time?"."""
     blocks_by_weekday: dict[int, list[tuple[time, time]]] = {}
     for nth in candidate.non_teaching_hours.all():
-        if only_non_paperwork and nth.is_paperwork:
+        if ceiling is not None and priority_by_kind[nth.kind] > ceiling:
             continue
         blocks_by_weekday.setdefault(nth.weekday, []).append((nth.start_time, nth.end_time))
     return blocks_by_weekday
@@ -100,18 +105,16 @@ def _covers(blocks_by_weekday: dict[int, list[tuple[time, time]]], segments) -> 
     return True
 
 
-def _is_free_during(candidate: Teacher, segments) -> bool:
-    """A candidate is free for a segment only if their non-teaching blocks for
-    that weekday - merged together - fully cover it as one continuous run.
-    Paperwork blocks count here: the teacher is still on campus and available,
-    just not idle."""
-    return _covers(_blocks_by_weekday(candidate), segments)
-
-
-def _has_nothing_to_do_during(candidate: Teacher, segments) -> bool:
-    """True if the candidate's coverage can be satisfied using only non-paperwork
-    blocks - i.e. pulling them in wouldn't interrupt any paperwork/admin time."""
-    return _covers(_blocks_by_weekday(candidate, only_non_paperwork=True), segments)
+def _disruption_priority(candidate: Teacher, segments, priority_by_kind: dict[str, int]) -> int | None:
+    """How disruptive it would be to pull `candidate` in for `segments`: the
+    best (lowest) priority ceiling at which their blocks still fully cover every
+    segment as one continuous run per day. `free` time gives the lowest number,
+    `escolta'm` the highest. Returns None when even all their blocks together
+    can't cover it - which is exactly the old eligibility test."""
+    for ceiling in sorted(set(priority_by_kind.values())):
+        if _covers(_blocks_by_weekday(candidate, ceiling, priority_by_kind), segments):
+            return ceiling
+    return None
 
 
 def _coverage_segments(absence: Absence, start_dt, end_dt) -> list[tuple[date, time, time]]:
@@ -128,7 +131,13 @@ def _coverage_segments(absence: Absence, start_dt, end_dt) -> list[tuple[date, t
 def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) -> list[Teacher]:
     """Same as `find_available_substitutes`, but scoped to an explicit
     [start_dt, end_dt) window instead of the absence's own range - used both
-    for the absence as a whole and for each split-off period within it."""
+    for the absence as a whole and for each split-off period within it.
+
+    Each returned Teacher carries `disruption_priority` (the priority of the
+    least-available kind of non-teaching time they'd have to be pulled off, per
+    NonTeachingHoursPriority), `is_fully_free` (that kind is the top-priority
+    one) and `coverage_kind_label` (its translated label), alongside
+    `same_grade` and `already_substituting`."""
     segments = _coverage_segments(absence, start_dt, end_dt)
 
     busy_with_own_absence = Absence.objects.filter(
@@ -150,20 +159,35 @@ def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) ->
         .order_by("substitutions_count", "user__last_name", "user__first_name")
     )
 
-    eligible = [candidate for candidate in candidates if _is_free_during(candidate, segments)]
-    for candidate in eligible:
+    priority_by_kind = NonTeachingHoursPriority.ordering_map()
+    best_priority = min(priority_by_kind.values())
+    label_by_priority: dict[int, str] = {}
+    for kind, priority in priority_by_kind.items():
+        label = str(NonTeachingHoursKind(kind).label)
+        label_by_priority[priority] = (
+            f"{label_by_priority[priority]} / {label}" if priority in label_by_priority else label
+        )
+
+    eligible = []
+    for candidate in candidates:
+        disruption = _disruption_priority(candidate, segments, priority_by_kind)
+        if disruption is None:
+            continue
+        candidate.disruption_priority = disruption
+        candidate.is_fully_free = disruption == best_priority
+        candidate.coverage_kind_label = label_by_priority[disruption]
         candidate.same_grade = candidate.grade_level == absence.teacher.grade_level
         candidate.already_substituting = candidate.pk in busy_substituting
-        candidate.has_nothing_to_do = _has_nothing_to_do_during(candidate, segments)
+        eligible.append(candidate)
 
     # Stable sort: candidates keep their existing substitutions_count/name order
-    # within each tier, since list comprehension above preserved the queryset's
-    # ordering and Python's sort is stable.
+    # within each tier, since the loop above preserved the queryset's ordering
+    # and Python's sort is stable.
     eligible.sort(
         key=lambda candidate: (
             0 if candidate.same_grade else 1,
             1 if candidate.already_substituting else 0,
-            0 if candidate.has_nothing_to_do else 1,
+            candidate.disruption_priority,
         )
     )
     return eligible
@@ -174,15 +198,17 @@ def find_available_substitutes(absence: Absence) -> list[Teacher]:
     teach the same grade level as the absent teacher (other grades are still
     shown, just deprioritized), then by whether they're already committed to
     substitute elsewhere during the window (shown for visibility, but not
-    selectable), then by whether they have nothing to do (fully free, not doing
-    paperwork), then by fewest substitutions already done (ascending), then
-    name. Eligibility requires: not the absent teacher, active, free
-    (non-teaching, paperwork or not) for the whole requested window, and not
-    out themselves (own absence) during that window.
+    selectable), then by how disruptive pulling them in would be (free time
+    first, then paperwork, co-teaching, escolta'm - the order is configurable
+    via NonTeachingHoursPriority), then by fewest substitutions already done
+    (ascending), then name. Eligibility requires: not the absent teacher,
+    active, some combination of non-teaching blocks (any kind) covering the
+    whole requested window, and not out themselves (own absence) during it.
 
-    Each returned Teacher has `same_grade`, `already_substituting` and
-    `has_nothing_to_do` attributes set, so callers (e.g. templates) can show
-    which tier a candidate falls in and whether they can be picked."""
+    Each returned Teacher has `same_grade`, `already_substituting`,
+    `disruption_priority`, `is_fully_free` and `coverage_kind_label` attributes
+    set, so callers (e.g. templates) can show which tier a candidate falls in
+    and whether they can be picked."""
     return _find_available_substitutes_for_range(absence, absence.start_datetime, absence.end_datetime)
 
 
@@ -242,7 +268,10 @@ def discarded_periods(absence: Absence) -> list[dict]:
 def _merged_intervals_for_range(candidate: Teacher, start_dt, end_dt) -> list[tuple[datetime, datetime]]:
     """Return the candidate's free time within [start_dt, end_dt) as a list of
     aware (start, end) datetime intervals, built from their weekly
-    non-teaching hours (merged per day) and clipped to the requested range."""
+    non-teaching hours (merged per day) and clipped to the requested range.
+    All kinds of non-teaching block count equally here - the kind only affects
+    ranking (see `_disruption_priority`), not what a teacher can be pulled off
+    to cover, nor what counts as the requester not teaching anyway."""
     segments = _daily_segments(start_dt, end_dt)
     blocks_by_weekday = _blocks_by_weekday(candidate)
     intervals = []
