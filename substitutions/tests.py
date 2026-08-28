@@ -924,3 +924,29 @@ class DashboardOffersToMeTests(TestCase):
         response = self.client.get(reverse("dashboard"))
 
         self.assertNotContains(response, "Coverage requests for you")
+
+
+class CaDateFormattingTests(TestCase):
+    def test_datetime_rendered_in_school_timezone_not_utc(self):
+        """DB datetimes come back as UTC; the ca_datetime helper must convert to
+        Europe/Madrid so a 9:00 absence never shows as 7:00."""
+        from .dates_ca import format_ca_datetime
+
+        aware = timezone.make_aware(datetime.datetime(2026, 6, 1, 9, 0))
+        as_utc = aware.astimezone(datetime.timezone.utc)
+
+        self.assertEqual(format_ca_datetime(as_utc), "Dilluns, 01/06/2026 09:00")
+
+    def test_dashboard_shows_local_start_time(self):
+        teacher = make_teacher("tz_dashboard")
+        Absence.objects.create(
+            teacher=teacher,
+            start_datetime=dt(2026, 6, 1, 9),
+            end_datetime=dt(2026, 6, 1, 17),
+        )
+        self.client.force_login(teacher.user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "09:00")
+        self.assertNotContains(response, "07:00")
