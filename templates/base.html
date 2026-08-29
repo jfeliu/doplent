@@ -15,12 +15,46 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="{% translate "Doplent" %}">
 
-  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="{{ ui_bootstrap_href }}" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
   <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+  <style>
+    /* Baseline every theme needs (Bootswatch swaps out the block below) */
+    main { max-width: 1100px; }
+    .navbar-brand { display: flex; align-items: center; gap: .5rem; }
+    .navbar-brand .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+    .navbar-brand .brand-tagline { font-weight: 400; font-size: .7rem; }
+    .navbar .nav-link { display: inline-flex; align-items: center; gap: .4rem; }
+    .empty-state {
+      border: 1.5px dashed var(--bs-border-color);
+      border-radius: .75rem; padding: 1.75rem 1rem; text-align: center;
+    }
+    .empty-state i { font-size: 1.5rem; display: block; margin-bottom: .4rem; }
+    /* Django's {{ form.as_p }} renders unclassed inputs - keep them usable everywhere */
+    form p { margin-bottom: 1rem; }
+    form label { display: block; font-weight: 600; font-size: .875rem; margin-bottom: .3rem; }
+    form input[type=text], form input[type=password], form input[type=email], form input[type=number],
+    form input[type=datetime-local], form input[type=date], form input[type=time], form input[type=file],
+    form select:not(.form-select-sm), form textarea {
+      width: 100%; padding: .5rem .8rem;
+      border: 1px solid var(--bs-border-color); border-radius: .55rem;
+      font-size: .95rem; font-family: inherit;
+    }
+    form input:focus, form select:focus, form textarea:focus {
+      outline: none; border-color: var(--bs-primary);
+      box-shadow: 0 0 0 .2rem rgba(var(--bs-primary-rgb), .2);
+    }
+    form input[type=checkbox]:not(.form-check-input), form input[type=radio]:not(.form-check-input) { width: auto; margin-right: .4rem; }
+    form .helptext { display: block; font-size: .8rem; margin-top: .3rem; }
+    form ul.errorlist { list-style: none; padding: 0; margin: .3rem 0 0; color: var(--bs-danger); font-size: .85rem; font-weight: 500; }
+    .table thead th { font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; border-bottom-width: 1px; font-weight: 700; }
+  </style>
+
+  {% if ui_theme == "default" %}
   <style>
     :root {
       --bs-primary: #4f46e5;
@@ -161,10 +195,11 @@
       font-weight: 700;
     }
   </style>
+  {% endif %}
   {% block extra_head %}{% endblock %}
 </head>
 <body>
-  <nav class="navbar navbar-expand-lg mb-4">
+  <nav class="navbar navbar-expand-lg mb-4{% if ui_theme != 'default' %} bg-body-tertiary border-bottom{% endif %}">
     <div class="container">
       <a class="navbar-brand" href="{% url 'dashboard' %}">
         <i class="bi bi-calendar2-check"></i>
@@ -215,6 +250,19 @@
     {% endif %}
     {% block content %}{% endblock %}
   </main>
+
+  {% if user.is_staff %}
+  {# Throwaway theme switcher - see config/context_processors.py #}
+  <div class="position-fixed bottom-0 end-0 m-3" style="z-index: 1050;">
+    <select class="form-select form-select-sm shadow-sm" aria-label="{% translate "UI theme" %}"
+            onchange="document.cookie='ui_theme='+this.value+';path=/;max-age=31536000;samesite=lax';location.reload()">
+      {% for key, label in ui_themes.items %}
+      <option value="{{ key }}" {% if key == ui_theme %}selected{% endif %}>{{ label }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% endif %}
+
   <script>
     if ("serviceWorker" in navigator) {
       window.addEventListener("load", () => navigator.serviceWorker.register("/sw.js"));
