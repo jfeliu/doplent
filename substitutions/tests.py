@@ -577,6 +577,15 @@ class WorkingHoursTests(TestCase):
         self.assertEqual(uncovered_ranges(absence), [])
         self.assertEqual(find_available_substitutes(absence), [])
 
+    def test_weekend_absence_needs_no_substitute(self):
+        # 2024-01-13 is a Saturday - the school doesn't run.
+        absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=dt(2024, 1, 13, 9), end_datetime=dt(2024, 1, 13, 11)
+        )
+
+        self.assertEqual(uncovered_ranges(absence), [])
+        self.assertEqual(build_coverage_plan(absence), [])
+
     def test_absence_spanning_lunch_break_splits_around_it(self):
         # Noon to 3:30pm spans the 1-3pm non-working break.
         absence = Absence.objects.create(
@@ -1122,6 +1131,19 @@ class ReportAbsenceFormTests(TestCase):
 
     def test_period_entirely_outside_school_hours_is_rejected(self):
         response = self._post("13:00", "15:00")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "classes per cobrir", " ".join(response.context["form"].non_field_errors())
+        )
+        self.assertFalse(Absence.objects.exists())
+
+    def test_period_on_a_weekend_is_rejected(self):
+        # 2024-01-13 is a Saturday.
+        response = self.client.post(
+            reverse("report_absence"),
+            {"date": "2024-01-13", "start_time": "09:00", "end_time": "11:00", "reason": Absence.Reason.PERMITS},
+        )
 
         self.assertEqual(response.status_code, 200)
         self.assertIn(

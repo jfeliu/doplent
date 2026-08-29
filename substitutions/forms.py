@@ -72,7 +72,8 @@ class AbsenceForm(forms.ModelForm):
                     None,
                     _(
                         "You have no classes to cover then - the whole period falls "
-                        "within your non-teaching hours or outside school hours."
+                        "within your non-teaching hours, outside school hours, or on "
+                        "a weekend."
                     ),
                 )
         return cleaned

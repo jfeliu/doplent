@@ -18,10 +18,10 @@ msgstr "La data de fi ha de ser posterior a la d'inici."
 
 msgid ""
 "You have no classes to cover then - the whole period falls within your non-"
-"teaching hours or outside school hours."
+"teaching hours, outside school hours, or on a weekend."
 msgstr ""
 "No tens classes per cobrir en aquest període - tot recau en les teves hores "
-"no lectives o fora de l'horari escolar."
+"no lectives, fora de l'horari escolar o en cap de setmana."
 
 msgid "unavailable from"
 msgstr "no disponible des de"

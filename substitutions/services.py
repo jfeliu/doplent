@@ -14,6 +14,10 @@ WORKING_HOURS: list[tuple[time, time]] = [
     (time(15, 0), time(17, 0)),
 ]
 
+# Weekdays the school runs (Monday=0 ... Sunday=6). Nothing needs covering on
+# any other day.
+SCHOOL_WEEKDAYS: frozenset[int] = frozenset({0, 1, 2, 3, 4})
+
 
 def _daily_segments(start_dt, end_dt) -> list[tuple[date, time, time]]:
     """Split [start_dt, end_dt) into one (date, start_time, end_time) segment per
@@ -65,8 +69,9 @@ def _subtract_intervals(range_start, range_end, remove: list[tuple[datetime, dat
 
 
 def _outside_working_hours(start_dt, end_dt) -> list[tuple[datetime, datetime]]:
-    """Datetime intervals within [start_dt, end_dt) that fall outside
-    WORKING_HOURS, one entry per day touched."""
+    """Datetime intervals within [start_dt, end_dt) that fall outside the
+    school's working hours, one entry per day touched. A day the school doesn't
+    run at all (weekend) counts as entirely outside working hours."""
     intervals = []
     for day, seg_start, seg_end in _daily_segments(start_dt, end_dt):
         day_start = timezone.make_aware(datetime.combine(day, seg_start))
@@ -78,7 +83,7 @@ def _outside_working_hours(start_dt, end_dt) -> list[tuple[datetime, datetime]]:
             )
             for w_start, w_end in WORKING_HOURS
             if w_start < seg_end and w_end > seg_start
-        ]
+        ] if day.weekday() in SCHOOL_WEEKDAYS else []
         intervals.extend(_subtract_intervals(day_start, day_end, working_today))
     return intervals
 
