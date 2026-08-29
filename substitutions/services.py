@@ -349,9 +349,10 @@ def build_coverage_plan(absence: Absence) -> list[dict]:
       start_datetime, end_datetime - the gap
       whole    - teachers who can cover the entire gap (as
                  `find_available_substitutes`); [] when none can
-      parts    - an alternative breakdown of the gap into consecutive
-                 stretches, each a dict with start_datetime / end_datetime /
-                 candidates; [] unless splitting between teachers actually helps
+      parts    - an alternative breakdown of the gap into stretches that
+                 together tile it, each a dict with start_datetime /
+                 end_datetime / candidates, ordered longest stretch first;
+                 [] unless splitting between teachers actually helps
       coverable - whether the gap can be covered at all, whole or split
 
     `whole` and `parts` are both offered whenever both are possible, so the
@@ -374,6 +375,9 @@ def build_coverage_plan(absence: Absence) -> list[dict]:
             if splittable
             else []
         )
+        # Longest stretches first (then chronological), so the picker fills the
+        # big blocks before mopping up the short ones.
+        parts.sort(key=lambda part: (part["start_datetime"] - part["end_datetime"], part["start_datetime"]))
         if splittable and not whole_pickable:
             whole = []
 

@@ -474,6 +474,33 @@ class BuildCoveragePlanTests(TestCase):
         self.assertNotIn(first_half_only, parts[1]["candidates"])
         self.assertIn(covers_all, parts[1]["candidates"])
 
+    def test_parts_are_ordered_longest_stretch_first(self):
+        # A covers 9-10 (1h), B covers 10-10:30 (30m), C covers 10:30-12 (1.5h).
+        for name, start, end in [
+            ("part_a", datetime.time(9, 0), datetime.time(10, 0)),
+            ("part_b", datetime.time(10, 0), datetime.time(10, 30)),
+            ("part_c", datetime.time(10, 30), datetime.time(12, 0)),
+        ]:
+            WeeklyNonTeachingHours.objects.create(
+                teacher=make_teacher(name),
+                weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+                start_time=start,
+                end_time=end,
+            )
+
+        parts = build_coverage_plan(self.absence)[0]["parts"]
+
+        durations = [p["end_datetime"] - p["start_datetime"] for p in parts]
+        self.assertEqual(durations, sorted(durations, reverse=True))
+        self.assertEqual(
+            [(p["start_datetime"], p["end_datetime"]) for p in parts],
+            [
+                (dt(2024, 1, 8, 10, 30), dt(2024, 1, 8, 12)),
+                (dt(2024, 1, 8, 9), dt(2024, 1, 8, 10)),
+                (dt(2024, 1, 8, 10), dt(2024, 1, 8, 10, 30)),
+            ],
+        )
+
     def test_gap_nobody_is_free_during_is_not_coverable(self):
         # Free 9-10 and 11-12, with a 10-11 hole nobody covers at all.
         only_edges = make_teacher("only_edges")
