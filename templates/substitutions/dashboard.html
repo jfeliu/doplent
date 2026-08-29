@@ -16,7 +16,7 @@
       <div>
         <div class="fw-semibold">{{ offer.absence.teacher }}</div>
         <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ offer.start_datetime|ca_timeframe:offer.end_datetime }}</div>
-        {% if offer.absence.reason %}<div class="text-muted small">{{ offer.absence.reason }}</div>{% endif %}
+        {% if offer.absence.reason %}<div class="text-muted small">{{ offer.absence.get_reason_display }}</div>{% endif %}
       </div>
       <a href="{% url 'respond_to_offer' offer.pk %}" class="btn btn-sm btn-primary">{% translate "Respond" %}</a>
     </li>
@@ -34,7 +34,7 @@
         {% for absence in my_absences %}
         <li class="list-group-item py-3">
           <div class="fw-semibold"><i class="bi bi-clock-history text-muted me-1"></i>{{ absence.start_datetime|ca_timeframe:absence.end_datetime }}</div>
-          {% if absence.reason %}<div class="text-muted small mt-1">{{ absence.reason }}</div>{% endif %}
+          {% if absence.reason %}<div class="text-muted small mt-1">{{ absence.get_reason_display }}</div>{% endif %}
           {% if absence.substitutions.all %}
             <div class="small mt-2 d-flex flex-column align-items-start gap-1">
               {% for sub in absence.substitutions.all %}
