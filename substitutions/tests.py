@@ -501,6 +501,41 @@ class BuildCoveragePlanTests(TestCase):
             ],
         )
 
+    def test_parts_are_the_fewest_chunks_not_split_at_every_change(self):
+        # long_a is free the whole first two hours; short_b overlaps only the
+        # middle. The split should be 9-11 / 11-12, not fragmented into
+        # 9-10 / 10-11 / 11-12 by short_b coming and going.
+        long_a = make_teacher("long_a")
+        WeeklyNonTeachingHours.objects.create(
+            teacher=long_a,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(11, 0),
+        )
+        short_b = make_teacher("short_b")
+        WeeklyNonTeachingHours.objects.create(
+            teacher=short_b,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(10, 0),
+            end_time=datetime.time(11, 0),
+        )
+        late_c = make_teacher("late_c")
+        WeeklyNonTeachingHours.objects.create(
+            teacher=late_c,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(11, 0),
+            end_time=datetime.time(12, 0),
+        )
+
+        parts = build_coverage_plan(self.absence)[0]["parts"]
+
+        self.assertEqual(
+            [(p["start_datetime"], p["end_datetime"]) for p in parts],
+            [(dt(2024, 1, 8, 9), dt(2024, 1, 8, 11)), (dt(2024, 1, 8, 11), dt(2024, 1, 8, 12))],
+        )
+        self.assertIn(long_a, parts[0]["candidates"])
+        self.assertNotIn(short_b, parts[0]["candidates"])  # doesn't cover all of 9-11
+
     def test_gap_nobody_is_free_during_is_not_coverable(self):
         # Free 9-10 and 11-12, with a 10-11 hole nobody covers at all.
         only_edges = make_teacher("only_edges")

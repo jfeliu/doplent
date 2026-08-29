@@ -310,36 +310,41 @@ def _merged_intervals_for_range(candidate: Teacher, start_dt, end_dt) -> list[tu
     return intervals
 
 
-def _partition_by_availability(
-    absence: Absence, gap_start, gap_end
-) -> list[tuple[datetime, datetime, list[Teacher]]]:
-    """Split [gap_start, gap_end) at each point where the set of available
-    substitutes changes, merging back adjacent stretches that share the same
-    set. Returns [(start, end, candidates), ...], candidates as from
-    `find_available_substitutes` scoped to that stretch. A single entry means
-    the same teachers are free right across the gap - nothing to split."""
-    points = {gap_start, gap_end}
+def _fewest_covering_chunks(absence: Absence, gap_start, gap_end) -> list[tuple[datetime, datetime]] | None:
+    """Tile [gap_start, gap_end) with as few contiguous chunks as possible,
+    each coverable in full by some available teacher. Partial coverers drive
+    the cut points (greedily extending as far as one can reach from each cut);
+    a teacher free for the whole gap fills any stretch the partial ones can't,
+    as a single trailing chunk. Returns None when the gap can't be tiled at
+    all."""
+    partial: list[tuple[datetime, datetime]] = []
+    spanning = False
     for candidate in _candidate_pool(absence, gap_start, gap_end):
         for free_start, free_end in _merged_intervals_for_range(candidate, gap_start, gap_end):
-            points.update((free_start, free_end))
-    points = sorted(point for point in points if gap_start <= point <= gap_end)
+            if free_start <= gap_start and free_end >= gap_end:
+                spanning = True
+            else:
+                partial.append((free_start, free_end))
+    partial.sort()
 
-    boundaries = [gap_start]
-    previous_ids = None
-    for segment_start, segment_end in zip(points, points[1:]):
-        ids = frozenset(
-            candidate.pk
-            for candidate in _find_available_substitutes_for_range(absence, segment_start, segment_end)
-        )
-        if previous_ids is not None and ids != previous_ids:
-            boundaries.append(segment_start)
-        previous_ids = ids
-    boundaries.append(gap_end)
-
-    return [
-        (start, end, _find_available_substitutes_for_range(absence, start, end))
-        for start, end in zip(boundaries, boundaries[1:])
-    ]
+    chunks: list[tuple[datetime, datetime]] = []
+    current = gap_start
+    index = 0
+    while current < gap_end:
+        farthest = current
+        while index < len(partial) and partial[index][0] <= current:
+            if partial[index][1] > farthest:
+                farthest = partial[index][1]
+            index += 1
+        if farthest > current:
+            chunks.append((current, min(farthest, gap_end)))
+            current = min(farthest, gap_end)
+        elif spanning:
+            chunks.append((current, gap_end))
+            current = gap_end
+        else:
+            return None
+    return chunks
 
 
 def build_coverage_plan(absence: Absence) -> list[dict]:
@@ -349,8 +354,8 @@ def build_coverage_plan(absence: Absence) -> list[dict]:
       start_datetime, end_datetime - the gap
       whole    - teachers who can cover the entire gap (as
                  `find_available_substitutes`); [] when none can
-      parts    - an alternative breakdown of the gap into stretches that
-                 together tile it, each a dict with start_datetime /
+      parts    - the gap tiled into the fewest chunks that different teachers
+                 could each cover, each a dict with start_datetime /
                  end_datetime / candidates, ordered longest stretch first;
                  [] unless splitting between teachers actually helps
       coverable - whether the gap can be covered at all, whole or split
@@ -362,15 +367,19 @@ def build_coverage_plan(absence: Absence) -> list[dict]:
         whole = _find_available_substitutes_for_range(absence, gap_start, gap_end)
         whole_pickable = any(not candidate.already_substituting for candidate in whole)
 
-        partition = _partition_by_availability(absence, gap_start, gap_end)
-        splittable = len(partition) > 1 and all(
+        chunks = _fewest_covering_chunks(absence, gap_start, gap_end) or []
+        chunk_slots = [
+            (start, end, _find_available_substitutes_for_range(absence, start, end))
+            for start, end in chunks
+        ]
+        splittable = len(chunk_slots) > 1 and all(
             any(not candidate.already_substituting for candidate in candidates)
-            for _, _, candidates in partition
+            for _, _, candidates in chunk_slots
         )
         parts = (
             [
                 {"start_datetime": start, "end_datetime": end, "candidates": candidates}
-                for start, end, candidates in partition
+                for start, end, candidates in chunk_slots
             ]
             if splittable
             else []
