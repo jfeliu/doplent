@@ -48,11 +48,15 @@ jobs:
           ls -lh "$out"
           echo "out=$out" >> "$GITHUB_ENV"
 
-      - name: Install rclone
+      - name: Ensure rclone
+        # The runner image usually already ships rclone; fall back to apt (an
+        # Azure-hosted mirror) rather than downloads.rclone.org, which has timed
+        # out from CI.
         run: |
-          curl -fsSL -o rclone.zip https://downloads.rclone.org/rclone-current-linux-amd64.zip
-          unzip -q rclone.zip
-          sudo install rclone-*-linux-amd64/rclone /usr/local/bin/rclone
+          if ! command -v rclone >/dev/null; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq rclone
+          fi
           rclone version | head -1
 
       - name: Upload to Google Drive and prune old backups

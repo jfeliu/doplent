@@ -92,8 +92,9 @@ gpg --batch --pinentry-mode loopback --passphrase-file pp \
   that line to taste.
 - `pg_dump` is pinned to `postgres:17-alpine`; if Supabase moves past Postgres
   17, bump that tag or the dump step will refuse to run.
-- `rclone` is installed from `rclone-current` (its official latest build); pin a
-  version in the install step if you want reproducibility.
+- `rclone` comes from the runner image, or `apt` if that image ever drops it.
+  Both are old-ish but fine for `copy`/`delete`/`lsl`; add a pinned download
+  from GitHub releases in the "Ensure rclone" step if you need a specific one.
 - This is a stopgap for the free tier. Supabase Pro adds managed daily backups
   and removes the idle-pause, at which point this workflow is a belt-and-braces
   extra rather than the only line of defence.
