@@ -117,14 +117,23 @@ def _disruption_priority(candidate: Teacher, segments, priority_by_kind: dict[st
     return None
 
 
+def coverage_needed(teacher: Teacher, start_dt, end_dt) -> list[tuple[datetime, datetime]]:
+    """The sub-intervals of [start_dt, end_dt) that would actually need a
+    substitute: the requested range minus the teacher's own weekly non-teaching
+    hours (no one covers a class that wasn't happening anyway) and minus any
+    time outside the school's working hours. Empty when the teacher wasn't due
+    to be teaching for any of the requested time."""
+    requester_free = _merged_intervals_for_range(teacher, start_dt, end_dt)
+    non_working = _outside_working_hours(start_dt, end_dt)
+    return _subtract_intervals(start_dt, end_dt, requester_free + non_working)
+
+
 def _coverage_segments(absence: Absence, start_dt, end_dt) -> list[tuple[date, time, time]]:
     """Segments within [start_dt, end_dt) that actually need a substitute -
     excludes any time the absent teacher's own weekly non-teaching hours
     already cover (no one needs to cover a class that wasn't happening
     anyway), and any time outside the school's working hours."""
-    requester_free = _merged_intervals_for_range(absence.teacher, start_dt, end_dt)
-    non_working = _outside_working_hours(start_dt, end_dt)
-    needed_ranges = _subtract_intervals(start_dt, end_dt, requester_free + non_working)
+    needed_ranges = coverage_needed(absence.teacher, start_dt, end_dt)
     return [segment for r_start, r_end in needed_ranges for segment in _daily_segments(r_start, r_end)]
 
 
@@ -230,11 +239,7 @@ def uncovered_ranges(absence: Absence) -> list[tuple[datetime, datetime]]:
     non-teaching hours, or outside the school's working hours, is never a
     gap - there's nothing to cover then. Empty once the absence is fully
     covered."""
-    requester_free = _merged_intervals_for_range(absence.teacher, absence.start_datetime, absence.end_datetime)
-    non_working = _outside_working_hours(absence.start_datetime, absence.end_datetime)
-    needing_coverage = _subtract_intervals(
-        absence.start_datetime, absence.end_datetime, requester_free + non_working
-    )
+    needing_coverage = coverage_needed(absence.teacher, absence.start_datetime, absence.end_datetime)
     covered = [(sub.start_datetime, sub.end_datetime) for sub in absence.substitutions.all()]
     gaps = []
     for need_start, need_end in needing_coverage:

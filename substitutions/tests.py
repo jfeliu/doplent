@@ -1087,3 +1087,56 @@ class DefaultLanguageTests(TestCase):
 
         self.assertEqual(response["Content-Language"], "en")
         self.assertContains(response, "Log in")
+
+
+class ReportAbsenceFormTests(TestCase):
+    """The report form refuses a period the requesting teacher wasn't due to be
+    teaching for at all - there'd be nothing for a substitute to cover."""
+
+    def setUp(self):
+        self.teacher = make_teacher("reporter")
+        self.client.force_login(self.teacher.user)
+
+    def _post(self, start, end, **extra):
+        # 2024-01-08 is a Monday.
+        return self.client.post(
+            reverse("report_absence"),
+            {"date": "2024-01-08", "start_time": start, "end_time": end, "reason": Absence.Reason.PERMITS, **extra},
+        )
+
+    def test_period_entirely_within_own_non_teaching_hours_is_rejected(self):
+        WeeklyNonTeachingHours.objects.create(
+            teacher=self.teacher,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(12, 0),
+        )
+
+        response = self._post("09:00", "11:00")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "classes per cobrir", " ".join(response.context["form"].non_field_errors())
+        )
+        self.assertFalse(Absence.objects.exists())
+
+    def test_period_entirely_outside_school_hours_is_rejected(self):
+        response = self._post("13:00", "15:00")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(
+            "classes per cobrir", " ".join(response.context["form"].non_field_errors())
+        )
+        self.assertFalse(Absence.objects.exists())
+
+    def test_period_with_some_teaching_time_still_goes_through(self):
+        WeeklyNonTeachingHours.objects.create(
+            teacher=self.teacher,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(10, 0),
+        )
+
+        response = self._post("09:00", "11:00")
+
+        self.assertRedirects(response, reverse("pick_substitute", args=[Absence.objects.get().pk]))

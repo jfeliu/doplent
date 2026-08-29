@@ -5,6 +5,7 @@ from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
 from .models import Absence
+from .services import coverage_needed
 
 WHOLE_DAY_START = time(9, 0)
 WHOLE_DAY_END = time(17, 0)
@@ -39,6 +40,10 @@ class AbsenceForm(forms.ModelForm):
         fields = ["reason"]
         field_order = ["date", "whole_day", "start_time", "end_time", "reason"]
 
+    def __init__(self, *args, teacher=None, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.teacher = teacher
+
     def clean(self):
         cleaned = super().clean()
         date = cleaned.get("date")
@@ -58,8 +63,18 @@ class AbsenceForm(forms.ModelForm):
                 self.add_error(None, _("End must be after start."))
 
         if date and start_time and end_time:
-            cleaned["start_datetime"] = timezone.make_aware(datetime.combine(date, start_time))
-            cleaned["end_datetime"] = timezone.make_aware(datetime.combine(date, end_time))
+            start_datetime = timezone.make_aware(datetime.combine(date, start_time))
+            end_datetime = timezone.make_aware(datetime.combine(date, end_time))
+            cleaned["start_datetime"] = start_datetime
+            cleaned["end_datetime"] = end_datetime
+            if self.teacher and not coverage_needed(self.teacher, start_datetime, end_datetime):
+                self.add_error(
+                    None,
+                    _(
+                        "You have no classes to cover then - the whole period falls "
+                        "within your non-teaching hours or outside school hours."
+                    ),
+                )
         return cleaned
 
     def save(self, commit=True):

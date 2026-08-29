@@ -53,7 +53,7 @@ def dashboard(request):
 def report_absence(request):
     teacher = get_object_or_404(Teacher, user=request.user)
     if request.method == "POST":
-        form = AbsenceForm(request.POST)
+        form = AbsenceForm(request.POST, teacher=teacher)
         if form.is_valid():
             absence = form.save(commit=False)
             absence.teacher = teacher
