@@ -25,7 +25,7 @@
         </div>
         <div class="text-muted small">{{ candidate.get_grade_level_display }}</div>
         <div class="text-muted small">
-          {% blocktranslate count counter=candidate.substitutions_count %}
+          {% blocktranslate trimmed count counter=candidate.substitutions_count %}
             {{ counter }} substitution done
           {% plural %}
             {{ counter }} substitutions done
