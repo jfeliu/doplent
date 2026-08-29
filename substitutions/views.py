@@ -73,16 +73,14 @@ def pick_substitute(request, absence_id):
     if not uncovered_ranges(absence):
         return redirect("dashboard")
 
-    slots = build_coverage_plan(absence)
+    plan = build_coverage_plan(absence)
 
     if request.method == "POST":
         slot_start = parse_datetime(request.POST.get("slot_start", ""))
         slot_end = parse_datetime(request.POST.get("slot_end", ""))
         substitute_id = request.POST.get("substitute_id")
-        slot = next(
-            (s for s in slots if s["start_datetime"] == slot_start and s["end_datetime"] == slot_end), None
-        )
-        chosen = next((c for c in slot["candidates"] if str(c.pk) == substitute_id), None) if slot else None
+        candidates = _candidates_for_slot(plan, slot_start, slot_end)
+        chosen = next((c for c in candidates if str(c.pk) == substitute_id), None)
         if chosen is not None and not chosen.already_substituting:
             offer, created = create_offer(absence, chosen, slot_start, slot_end)
             if created:
@@ -96,15 +94,36 @@ def pick_substitute(request, absence_id):
             absence=absence, status__in=[SubstitutionOffer.Status.PENDING, SubstitutionOffer.Status.DECLINED]
         ).order_by("created_at")
     }
-    for slot in slots:
-        for candidate in slot["candidates"]:
-            candidate.offer = offers_by_key.get((candidate.pk, slot["start_datetime"], slot["end_datetime"]))
+    for start, end, candidates in _iter_slots(plan):
+        for candidate in candidates:
+            candidate.offer = offers_by_key.get((candidate.pk, start, end))
 
     return render(
         request,
         "substitutions/pick_substitute.html",
-        {"absence": absence, "slots": slots, "discarded_periods": discarded_periods(absence)},
+        {
+            "absence": absence,
+            "plan": plan,
+            "must_split": any(not gap["whole"] and gap["parts"] for gap in plan),
+            "discarded_periods": discarded_periods(absence),
+        },
     )
+
+
+def _iter_slots(plan):
+    """Every pickable (start, end, candidates) triple in a coverage plan - each
+    gap's whole-gap slot plus every part slot."""
+    for gap in plan:
+        yield gap["start_datetime"], gap["end_datetime"], gap["whole"]
+        for part in gap["parts"]:
+            yield part["start_datetime"], part["end_datetime"], part["candidates"]
+
+
+def _candidates_for_slot(plan, slot_start, slot_end):
+    for start, end, candidates in _iter_slots(plan):
+        if start == slot_start and end == slot_end:
+            return candidates
+    return []
 
 
 @login_required

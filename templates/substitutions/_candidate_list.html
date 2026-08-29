@@ -1,0 +1,51 @@
+{% load i18n %}
+<div class="card">
+  <ul class="list-group list-group-flush">
+    {% for candidate in candidates %}
+    <li class="list-group-item d-flex flex-column flex-sm-row justify-content-sm-between align-items-start align-items-sm-center gap-2 py-3">
+      <div>
+        <div class="fw-semibold">
+          {{ candidate }}
+          {% if candidate.is_fully_free %}
+            <span class="badge bg-success-subtle text-success-emphasis ms-1"><i class="bi bi-check-circle-fill"></i> {{ candidate.coverage_kind_label }}</span>
+          {% else %}
+            <span class="badge bg-secondary-subtle text-secondary-emphasis ms-1">{{ candidate.coverage_kind_label }}</span>
+          {% endif %}
+          {% if not candidate.same_grade %}
+            <span class="badge bg-warning-subtle text-warning-emphasis ms-1"><i class="bi bi-exclamation-triangle-fill"></i> {% translate "Different grade" %}</span>
+          {% endif %}
+          {% if candidate.already_substituting %}
+            <span class="badge bg-danger-subtle text-danger-emphasis ms-1"><i class="bi bi-slash-circle-fill"></i> {% translate "Already covering another absence" %}</span>
+          {% endif %}
+          {% if candidate.offer.status == "pending" %}
+            <span class="badge bg-info-subtle text-info-emphasis ms-1"><i class="bi bi-hourglass-split"></i> {% translate "Awaiting response" %}</span>
+          {% elif candidate.offer.status == "declined" %}
+            <span class="badge bg-secondary-subtle text-secondary-emphasis ms-1"><i class="bi bi-x-circle"></i> {% translate "Previously declined" %}</span>
+          {% endif %}
+        </div>
+        <div class="text-muted small">{{ candidate.get_grade_level_display }}</div>
+        <div class="text-muted small">
+          {% blocktranslate count counter=candidate.substitutions_count %}
+            {{ counter }} substitution done
+          {% plural %}
+            {{ counter }} substitutions done
+          {% endblocktranslate %}
+        </div>
+      </div>
+      {% if candidate.already_substituting %}
+      <button type="button" class="btn btn-sm btn-outline-secondary" disabled>{% translate "Choose" %}</button>
+      {% elif candidate.offer.status == "pending" %}
+      <button type="button" class="btn btn-sm btn-outline-secondary" disabled>{% translate "Awaiting confirmation" %}</button>
+      {% else %}
+      <form method="post">
+        {% csrf_token %}
+        <input type="hidden" name="slot_start" value="{{ slot_start.isoformat }}">
+        <input type="hidden" name="slot_end" value="{{ slot_end.isoformat }}">
+        <input type="hidden" name="substitute_id" value="{{ candidate.pk }}">
+        <button type="submit" class="btn btn-sm btn-primary">{% translate "Choose" %}</button>
+      </form>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+</div>

@@ -407,17 +407,18 @@ class BuildCoveragePlanTests(TestCase):
             teacher=self.absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 12)
         )
 
-    def test_single_teacher_covering_everything_yields_one_slot(self):
+    def test_single_teacher_covering_everything_yields_one_whole_gap_no_parts(self):
         candidate = make_teacher("covers_all")
         give_free_all_week(candidate)
 
-        slots = build_coverage_plan(self.absence)
-        self.assertEqual(len(slots), 1)
-        self.assertEqual(slots[0]["start_datetime"], self.absence.start_datetime)
-        self.assertEqual(slots[0]["end_datetime"], self.absence.end_datetime)
-        self.assertIn(candidate, slots[0]["candidates"])
+        plan = build_coverage_plan(self.absence)
+        self.assertEqual(len(plan), 1)
+        self.assertEqual(plan[0]["start_datetime"], self.absence.start_datetime)
+        self.assertEqual(plan[0]["end_datetime"], self.absence.end_datetime)
+        self.assertIn(candidate, plan[0]["whole"])
+        self.assertEqual(plan[0]["parts"], [])
 
-    def test_no_one_covers_it_all_splits_into_periods_covering_the_full_range(self):
+    def test_no_one_covers_it_all_gives_parts_covering_the_full_range(self):
         # first_half is free 9-10:30, second_half is free 10:30-12: neither
         # alone covers the full 9-noon absence, but together they can.
         first_half = make_teacher("first_half")
@@ -435,20 +436,45 @@ class BuildCoveragePlanTests(TestCase):
             end_time=datetime.time(12, 0),
         )
 
-        slots = build_coverage_plan(self.absence)
+        plan = build_coverage_plan(self.absence)
 
-        self.assertEqual(len(slots), 2)
-        self.assertEqual(slots[0]["start_datetime"], self.absence.start_datetime)
-        self.assertEqual(slots[0]["end_datetime"], dt(2024, 1, 8, 10, 30))
-        self.assertIn(first_half, slots[0]["candidates"])
-        self.assertEqual(slots[1]["start_datetime"], dt(2024, 1, 8, 10, 30))
-        self.assertEqual(slots[1]["end_datetime"], self.absence.end_datetime)
-        self.assertIn(second_half, slots[1]["candidates"])
+        self.assertEqual(len(plan), 1)
+        self.assertEqual(plan[0]["whole"], [])
+        parts = plan[0]["parts"]
+        self.assertEqual(len(parts), 2)
+        self.assertEqual(parts[0]["start_datetime"], self.absence.start_datetime)
+        self.assertEqual(parts[0]["end_datetime"], dt(2024, 1, 8, 10, 30))
+        self.assertIn(first_half, parts[0]["candidates"])
+        self.assertEqual(parts[1]["start_datetime"], dt(2024, 1, 8, 10, 30))
+        self.assertEqual(parts[1]["end_datetime"], self.absence.end_datetime)
+        self.assertIn(second_half, parts[1]["candidates"])
+        # The parts tile the gap with no holes or overlaps.
+        self.assertEqual(parts[0]["end_datetime"], parts[1]["start_datetime"])
 
-        # The union of the slots covers the absence with no gaps or overlaps.
-        self.assertEqual(slots[0]["end_datetime"], slots[1]["start_datetime"])
+    def test_whole_and_parts_both_offered_when_both_are_possible(self):
+        covers_all = make_teacher("covers_all_too")
+        give_free_all_week(covers_all)
+        first_half_only = make_teacher("first_half_only")
+        WeeklyNonTeachingHours.objects.create(
+            teacher=first_half_only,
+            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+            start_time=datetime.time(9, 0),
+            end_time=datetime.time(10, 30),
+        )
 
-    def test_gap_nobody_is_free_during_cannot_be_split_away(self):
+        plan = build_coverage_plan(self.absence)
+
+        self.assertEqual(len(plan), 1)
+        self.assertIn(covers_all, plan[0]["whole"])
+        parts = plan[0]["parts"]
+        self.assertEqual([(p["start_datetime"], p["end_datetime"]) for p in parts],
+                          [(self.absence.start_datetime, dt(2024, 1, 8, 10, 30)),
+                           (dt(2024, 1, 8, 10, 30), self.absence.end_datetime)])
+        self.assertIn(first_half_only, parts[0]["candidates"])
+        self.assertNotIn(first_half_only, parts[1]["candidates"])
+        self.assertIn(covers_all, parts[1]["candidates"])
+
+    def test_gap_nobody_is_free_during_is_not_coverable(self):
         # Free 9-10 and 11-12, with a 10-11 hole nobody covers at all.
         only_edges = make_teacher("only_edges")
         WeeklyNonTeachingHours.objects.create(
@@ -464,14 +490,14 @@ class BuildCoveragePlanTests(TestCase):
             end_time=datetime.time(12, 0),
         )
 
-        slots = build_coverage_plan(self.absence)
+        plan = build_coverage_plan(self.absence)
 
-        # No possible split fully covers the range, so no slot offers a
-        # genuinely selectable candidate anywhere.
-        self.assertTrue(all(not c.already_substituting for slot in slots for c in slot["candidates"]))
-        self.assertFalse(any(slot["candidates"] for slot in slots))
+        self.assertEqual(len(plan), 1)
+        self.assertFalse(plan[0]["coverable"])
+        self.assertEqual(plan[0]["whole"], [])
+        self.assertEqual(plan[0]["parts"], [])
 
-    def test_already_covered_absence_has_no_open_slots(self):
+    def test_already_covered_absence_has_no_open_gaps(self):
         candidate = make_teacher("already_covering")
         give_free_all_week(candidate)
         make_substitution(self.absence, candidate)
@@ -502,15 +528,17 @@ class BuildCoveragePlanTests(TestCase):
             end_time=datetime.time(12, 0),
         )
 
-        slots = build_coverage_plan(self.absence)
+        plan = build_coverage_plan(self.absence)
 
-        self.assertEqual(len(slots), 2)
-        self.assertEqual(slots[0]["start_datetime"], self.absence.start_datetime)
-        self.assertEqual(slots[0]["end_datetime"], dt(2024, 1, 8, 10, 30))
-        self.assertEqual(slots[1]["start_datetime"], dt(2024, 1, 8, 11, 0))
-        self.assertEqual(slots[1]["end_datetime"], self.absence.end_datetime)
-        self.assertIn(candidate, slots[0]["candidates"])
-        self.assertIn(candidate, slots[1]["candidates"])
+        self.assertEqual(len(plan), 2)
+        self.assertEqual(plan[0]["start_datetime"], self.absence.start_datetime)
+        self.assertEqual(plan[0]["end_datetime"], dt(2024, 1, 8, 10, 30))
+        self.assertEqual(plan[1]["start_datetime"], dt(2024, 1, 8, 11, 0))
+        self.assertEqual(plan[1]["end_datetime"], self.absence.end_datetime)
+        self.assertIn(candidate, plan[0]["whole"])
+        self.assertIn(candidate, plan[1]["whole"])
+        self.assertEqual(plan[0]["parts"], [])
+        self.assertEqual(plan[1]["parts"], [])
 
     def test_partially_covered_absence_only_plans_the_remaining_gap(self):
         first_half = make_teacher("first_half_confirmed")
@@ -525,12 +553,12 @@ class BuildCoveragePlanTests(TestCase):
             end_time=datetime.time(12, 0),
         )
 
-        slots = build_coverage_plan(self.absence)
+        plan = build_coverage_plan(self.absence)
 
-        self.assertEqual(len(slots), 1)
-        self.assertEqual(slots[0]["start_datetime"], dt(2024, 1, 8, 10, 30))
-        self.assertEqual(slots[0]["end_datetime"], self.absence.end_datetime)
-        self.assertIn(second_half, slots[0]["candidates"])
+        self.assertEqual(len(plan), 1)
+        self.assertEqual(plan[0]["start_datetime"], dt(2024, 1, 8, 10, 30))
+        self.assertEqual(plan[0]["end_datetime"], self.absence.end_datetime)
+        self.assertIn(second_half, plan[0]["whole"])
 
 
 class WorkingHoursTests(TestCase):
@@ -747,6 +775,27 @@ class SplitPickSubstituteViewTests(TestCase):
         substitutions = Substitution.objects.filter(absence=self.absence).order_by("start_datetime")
         self.assertEqual(list(substitutions.values_list("substitute_teacher", flat=True)),
                           [self.first_half.pk, self.second_half.pk])
+
+    def test_whole_gap_teacher_and_a_partial_teacher_are_both_offered(self):
+        covers_all = make_teacher("view_covers_all")
+        give_free_all_week(covers_all)
+
+        response = self.client.get(reverse("pick_substitute", args=[self.absence.pk]))
+
+        self.assertContains(response, str(covers_all))     # whole-gap option
+        self.assertContains(response, str(self.first_half))  # partial option
+        # Picking the partial teacher for just their stretch makes an offer for
+        # that sub-range, not the whole gap.
+        self.client.post(
+            reverse("pick_substitute", args=[self.absence.pk]),
+            {
+                "slot_start": self.absence.start_datetime.isoformat(),
+                "slot_end": next_monday_dt(10, 30).isoformat(),
+                "substitute_id": self.first_half.pk,
+            },
+        )
+        offer = SubstitutionOffer.objects.get(absence=self.absence, substitute_teacher=self.first_half)
+        self.assertEqual(offer.end_datetime, next_monday_dt(10, 30))
 
 
 @override_settings(LANGUAGE_CODE="en")

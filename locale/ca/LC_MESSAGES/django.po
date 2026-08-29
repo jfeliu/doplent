@@ -238,13 +238,6 @@ msgstr "Tria"
 msgid "No eligible substitute is available for this time frame."
 msgstr "No hi ha cap substitut/a disponible per a aquest interval horari."
 
-msgid ""
-"No single teacher is free for the whole absence, so it's been split into "
-"smaller periods that can be covered by different teachers."
-msgstr ""
-"Cap docent no està lliure durant tota l'absència, així que s'ha dividit en "
-"períodes més curts que poden cobrir docents diferents."
-
 msgid "Report a time frame you can't work"
 msgstr "Notifica un interval horari en què no pots treballar"
 
@@ -576,3 +569,19 @@ msgstr ""
 msgid "Could not read the file - save it as UTF-8 CSV and try again."
 msgstr ""
 "No s'ha pogut llegir el fitxer; desa'l com a CSV UTF-8 i torna-ho a provar."
+
+msgid ""
+"Some periods have no single teacher free for the whole time - assign a "
+"different teacher to each part."
+msgstr ""
+"Alguns períodes no tenen cap docent lliure tota l'estona: assigna un docent "
+"diferent a cada tram."
+
+msgid "One teacher for the whole period"
+msgstr "Un sol docent per a tot el període"
+
+msgid "… or split it between teachers"
+msgstr "… o reparteix-lo entre diversos docents"
+
+msgid "Assign a teacher to each part"
+msgstr "Assigna un docent a cada tram"

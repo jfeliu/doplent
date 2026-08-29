@@ -128,6 +128,24 @@ def _coverage_segments(absence: Absence, start_dt, end_dt) -> list[tuple[date, t
     return [segment for r_start, r_end in needed_ranges for segment in _daily_segments(r_start, r_end)]
 
 
+def _candidate_pool(absence: Absence, start_dt, end_dt):
+    """Teachers who could conceivably cover part of [start_dt, end_dt): active,
+    not the absent teacher, and not away on their own absence then. Teachers
+    already substituting elsewhere are still included - they're shown in the
+    picker, just not selectable."""
+    busy_with_own_absence = (
+        Absence.objects.filter(start_datetime__lt=end_dt, end_datetime__gt=start_dt)
+        .exclude(pk=absence.pk)
+        .values_list("teacher_id", flat=True)
+    )
+    return (
+        Teacher.objects.filter(active=True)
+        .exclude(pk=absence.teacher_id)
+        .exclude(pk__in=list(busy_with_own_absence))
+        .prefetch_related("non_teaching_hours")
+    )
+
+
 def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) -> list[Teacher]:
     """Same as `find_available_substitutes`, but scoped to an explicit
     [start_dt, end_dt) window instead of the absence's own range - used both
@@ -140,10 +158,6 @@ def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) ->
     `same_grade` and `already_substituting`."""
     segments = _coverage_segments(absence, start_dt, end_dt)
 
-    busy_with_own_absence = Absence.objects.filter(
-        start_datetime__lt=end_dt, end_datetime__gt=start_dt
-    ).exclude(pk=absence.pk).values_list("teacher_id", flat=True)
-
     busy_substituting = set(
         Substitution.objects.filter(
             start_datetime__lt=end_dt, end_datetime__gt=start_dt
@@ -151,10 +165,7 @@ def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) ->
     )
 
     candidates = (
-        Teacher.objects.filter(active=True)
-        .exclude(pk=absence.teacher_id)
-        .exclude(pk__in=list(busy_with_own_absence))
-        .prefetch_related("non_teaching_hours")
+        _candidate_pool(absence, start_dt, end_dt)
         .annotate(substitutions_count=Count("substitutions_done"))
         .order_by("substitutions_count", "user__last_name", "user__first_name")
     )
@@ -289,87 +300,80 @@ def _merged_intervals_for_range(candidate: Teacher, start_dt, end_dt) -> list[tu
     return intervals
 
 
-def _greedy_min_cover(intervals, range_start, range_end):
-    """Classic greedy minimum-interval-cover: return the fewest (start, end)
-    pieces that together cover [range_start, range_end), always extending as
-    far as possible at each step. Returns None if the intervals can't fully
-    cover the range (there's a gap nobody is free during)."""
-    intervals = sorted(intervals)
-    n = len(intervals)
-    i = 0
-    current = range_start
-    periods = []
-    while current < range_end:
-        farthest = current
-        while i < n and intervals[i][0] <= current:
-            farthest = max(farthest, intervals[i][1])
-            i += 1
-        if farthest <= current:
-            return None
-        periods.append((current, min(farthest, range_end)))
-        current = farthest
-    return periods
+def _partition_by_availability(
+    absence: Absence, gap_start, gap_end
+) -> list[tuple[datetime, datetime, list[Teacher]]]:
+    """Split [gap_start, gap_end) at each point where the set of available
+    substitutes changes, merging back adjacent stretches that share the same
+    set. Returns [(start, end, candidates), ...], candidates as from
+    `find_available_substitutes` scoped to that stretch. A single entry means
+    the same teachers are free right across the gap - nothing to split."""
+    points = {gap_start, gap_end}
+    for candidate in _candidate_pool(absence, gap_start, gap_end):
+        for free_start, free_end in _merged_intervals_for_range(candidate, gap_start, gap_end):
+            points.update((free_start, free_end))
+    points = sorted(point for point in points if gap_start <= point <= gap_end)
 
+    boundaries = [gap_start]
+    previous_ids = None
+    for segment_start, segment_end in zip(points, points[1:]):
+        ids = frozenset(
+            candidate.pk
+            for candidate in _find_available_substitutes_for_range(absence, segment_start, segment_end)
+        )
+        if previous_ids is not None and ids != previous_ids:
+            boundaries.append(segment_start)
+        previous_ids = ids
+    boundaries.append(gap_end)
 
-def _split_into_covered_periods(absence: Absence, start_dt, end_dt) -> list[tuple[datetime, datetime]] | None:
-    """Find the fewest contiguous sub-periods of [start_dt, end_dt) such that
-    each one has at least one teacher genuinely free for its whole span (not
-    counting their own overlapping absence or another substitution they're
-    already committed to). Returns None if no combination of teachers can
-    fully cover the range."""
-    busy_with_own_absence = Absence.objects.filter(
-        start_datetime__lt=end_dt, end_datetime__gt=start_dt
-    ).exclude(pk=absence.pk).values_list("teacher_id", flat=True)
-    busy_substituting = Substitution.objects.filter(
-        start_datetime__lt=end_dt, end_datetime__gt=start_dt
-    ).values_list("substitute_teacher_id", flat=True)
-
-    pool = (
-        Teacher.objects.filter(active=True)
-        .exclude(pk=absence.teacher_id)
-        .exclude(pk__in=list(busy_with_own_absence))
-        .exclude(pk__in=list(busy_substituting))
-        .prefetch_related("non_teaching_hours")
-    )
-
-    intervals = []
-    for candidate in pool:
-        intervals.extend(_merged_intervals_for_range(candidate, start_dt, end_dt))
-
-    return _greedy_min_cover(intervals, start_dt, end_dt)
+    return [
+        (start, end, _find_available_substitutes_for_range(absence, start, end))
+        for start, end in zip(boundaries, boundaries[1:])
+    ]
 
 
 def build_coverage_plan(absence: Absence) -> list[dict]:
-    """Return the coverage slots still needed for `absence`: one per gap not
-    yet covered by a confirmed Substitution. Each slot is a dict with
-    `start_datetime`, `end_datetime` and `candidates` (as returned by
-    `find_available_substitutes`, scoped to that slot).
+    """Return one entry per gap in `absence` not yet covered by a confirmed
+    Substitution, in chronological order. Each entry is a dict:
 
-    When a single teacher can cover a gap by themselves, it's returned as one
-    slot spanning the whole gap - same as before splitting existed. Otherwise
-    the gap is split into the fewest sub-periods that each have at least one
-    genuinely available teacher, so the gap can be covered by several
-    teachers together. If a gap can't be covered at all, even split, it's
-    still returned as a single slot (with no selectable candidates) so the
-    caller can show why."""
-    slots = []
+      start_datetime, end_datetime - the gap
+      whole    - teachers who can cover the entire gap (as
+                 `find_available_substitutes`); [] when none can
+      parts    - an alternative breakdown of the gap into consecutive
+                 stretches, each a dict with start_datetime / end_datetime /
+                 candidates; [] unless splitting between teachers actually helps
+      coverable - whether the gap can be covered at all, whole or split
+
+    `whole` and `parts` are both offered whenever both are possible, so the
+    picker can hand the whole gap to one teacher or split it between several."""
+    plan = []
     for gap_start, gap_end in uncovered_ranges(absence):
-        gap_candidates = _find_available_substitutes_for_range(absence, gap_start, gap_end)
-        if any(not candidate.already_substituting for candidate in gap_candidates):
-            slots.append({"start_datetime": gap_start, "end_datetime": gap_end, "candidates": gap_candidates})
-            continue
+        whole = _find_available_substitutes_for_range(absence, gap_start, gap_end)
+        whole_pickable = any(not candidate.already_substituting for candidate in whole)
 
-        periods = _split_into_covered_periods(absence, gap_start, gap_end)
-        if periods is None:
-            slots.append({"start_datetime": gap_start, "end_datetime": gap_end, "candidates": gap_candidates})
-            continue
+        partition = _partition_by_availability(absence, gap_start, gap_end)
+        splittable = len(partition) > 1 and all(
+            any(not candidate.already_substituting for candidate in candidates)
+            for _, _, candidates in partition
+        )
+        parts = (
+            [
+                {"start_datetime": start, "end_datetime": end, "candidates": candidates}
+                for start, end, candidates in partition
+            ]
+            if splittable
+            else []
+        )
+        if splittable and not whole_pickable:
+            whole = []
 
-        for period_start, period_end in periods:
-            slots.append(
-                {
-                    "start_datetime": period_start,
-                    "end_datetime": period_end,
-                    "candidates": _find_available_substitutes_for_range(absence, period_start, period_end),
-                }
-            )
-    return slots
+        plan.append(
+            {
+                "start_datetime": gap_start,
+                "end_datetime": gap_end,
+                "whole": whole,
+                "parts": parts,
+                "coverable": whole_pickable or splittable,
+            }
+        )
+    return plan

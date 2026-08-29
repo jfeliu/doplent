@@ -5,10 +5,10 @@
 <h1 class="h4 mb-1"><i class="bi bi-person-check text-primary me-1"></i>{% translate "Pick a substitute" %}</h1>
 <p class="text-muted mb-3"><i class="bi bi-clock-history me-1"></i>{{ absence.start_datetime|ca_timeframe:absence.end_datetime }}</p>
 
-{% if slots|length > 1 %}
+{% if must_split %}
 <div class="alert alert-info d-flex align-items-center gap-2">
   <i class="bi bi-signpost-split"></i>
-  {% translate "No single teacher is free for the whole absence, so it's been split into smaller periods that can be covered by different teachers." %}
+  {% translate "Some periods have no single teacher free for the whole time - assign a different teacher to each part." %}
 </div>
 {% endif %}
 
@@ -32,61 +32,30 @@
 
 <div class="row">
   <div class="col-md-7 d-flex flex-column gap-4">
-    {% for slot in slots %}
+    {% for gap in plan %}
     <div>
-      <h2 class="h6 mb-2"><i class="bi bi-clock-history text-muted me-1"></i>{% translate "Covering" %} {{ slot.start_datetime|ca_timeframe:slot.end_datetime }}</h2>
-      {% if slot.candidates %}
-      <div class="card">
-        <ul class="list-group list-group-flush">
-          {% for candidate in slot.candidates %}
-          <li class="list-group-item d-flex flex-column flex-sm-row justify-content-sm-between align-items-start align-items-sm-center gap-2 py-3">
-            <div>
-              <div class="fw-semibold">
-                {{ candidate }}
-                {% if candidate.is_fully_free %}
-                  <span class="badge bg-success-subtle text-success-emphasis ms-1"><i class="bi bi-check-circle-fill"></i> {{ candidate.coverage_kind_label }}</span>
-                {% else %}
-                  <span class="badge bg-secondary-subtle text-secondary-emphasis ms-1">{{ candidate.coverage_kind_label }}</span>
-                {% endif %}
-                {% if not candidate.same_grade %}
-                  <span class="badge bg-warning-subtle text-warning-emphasis ms-1"><i class="bi bi-exclamation-triangle-fill"></i> {% translate "Different grade" %}</span>
-                {% endif %}
-                {% if candidate.already_substituting %}
-                  <span class="badge bg-danger-subtle text-danger-emphasis ms-1"><i class="bi bi-slash-circle-fill"></i> {% translate "Already covering another absence" %}</span>
-                {% endif %}
-                {% if candidate.offer.status == "pending" %}
-                  <span class="badge bg-info-subtle text-info-emphasis ms-1"><i class="bi bi-hourglass-split"></i> {% translate "Awaiting response" %}</span>
-                {% elif candidate.offer.status == "declined" %}
-                  <span class="badge bg-secondary-subtle text-secondary-emphasis ms-1"><i class="bi bi-x-circle"></i> {% translate "Previously declined" %}</span>
-                {% endif %}
-              </div>
-              <div class="text-muted small">{{ candidate.get_grade_level_display }}</div>
-              <div class="text-muted small">
-                {% blocktranslate count counter=candidate.substitutions_count %}
-                  {{ counter }} substitution done
-                {% plural %}
-                  {{ counter }} substitutions done
-                {% endblocktranslate %}
-              </div>
-            </div>
-            {% if candidate.already_substituting %}
-            <button type="button" class="btn btn-sm btn-outline-secondary" disabled>{% translate "Choose" %}</button>
-            {% elif candidate.offer.status == "pending" %}
-            <button type="button" class="btn btn-sm btn-outline-secondary" disabled>{% translate "Awaiting confirmation" %}</button>
-            {% else %}
-            <form method="post">
-              {% csrf_token %}
-              <input type="hidden" name="slot_start" value="{{ slot.start_datetime.isoformat }}">
-              <input type="hidden" name="slot_end" value="{{ slot.end_datetime.isoformat }}">
-              <input type="hidden" name="substitute_id" value="{{ candidate.pk }}">
-              <button type="submit" class="btn btn-sm btn-primary">{% translate "Choose" %}</button>
-            </form>
-            {% endif %}
-          </li>
-          {% endfor %}
-        </ul>
+      <h2 class="h6 mb-2"><i class="bi bi-clock-history text-muted me-1"></i>{% translate "Covering" %} {{ gap.start_datetime|ca_timeframe:gap.end_datetime }}</h2>
+
+      {% if gap.whole %}
+      {% if gap.parts %}<div class="text-muted small mb-2">{% translate "One teacher for the whole period" %}</div>{% endif %}
+      {% include "substitutions/_candidate_list.html" with candidates=gap.whole slot_start=gap.start_datetime slot_end=gap.end_datetime %}
+      {% endif %}
+
+      {% if gap.parts %}
+      <div class="text-muted small mb-2 {% if gap.whole %}mt-3{% endif %}">
+        {% if gap.whole %}{% translate "… or split it between teachers" %}{% else %}{% translate "Assign a teacher to each part" %}{% endif %}
       </div>
-      {% else %}
+      <div class="d-flex flex-column gap-3">
+        {% for part in gap.parts %}
+        <div>
+          <div class="fw-semibold small mb-1"><i class="bi bi-arrow-return-right text-muted me-1"></i>{{ part.start_datetime|ca_timeframe:part.end_datetime }}</div>
+          {% include "substitutions/_candidate_list.html" with candidates=part.candidates slot_start=part.start_datetime slot_end=part.end_datetime %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if not gap.whole and not gap.parts %}
       <div class="alert alert-warning d-flex align-items-center gap-2">
         <i class="bi bi-exclamation-triangle"></i>
         {% translate "No eligible substitute is available for this time frame." %}
