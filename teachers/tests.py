@@ -328,3 +328,30 @@ class WeeklyCalendarAdminViewTests(TestCase):
         html = response.content.decode()
         self.assertIn("dilluns", html)  # confirms Catalan really is active
         self.assertNotRegex(html, r"\d,\d")
+
+
+class EditScheduleAccessTests(TestCase):
+    """Only admin (staff) users may edit weekly schedules."""
+
+    def test_non_staff_teacher_gets_403_opening_the_editor(self):
+        teacher = make_teacher("Reg", "User")
+        self.client.force_login(teacher.user)
+
+        self.assertEqual(self.client.get(reverse("edit_schedule")).status_code, 403)
+
+    def test_non_staff_teacher_cannot_post_schedule_changes(self):
+        teacher = make_teacher("Reg", "Poster")
+        self.client.force_login(teacher.user)
+
+        response = self.client.post(reverse("edit_schedule"), {})
+
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(teacher.non_teaching_hours.exists())
+
+    def test_staff_teacher_can_open_the_editor(self):
+        teacher = make_teacher("Boss", "User")
+        teacher.user.is_staff = True
+        teacher.user.save()
+        self.client.force_login(teacher.user)
+
+        self.assertEqual(self.client.get(reverse("edit_schedule")).status_code, 200)
