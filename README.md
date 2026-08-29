@@ -231,6 +231,11 @@ app container, so nothing else is needed for those.
    `release_command` in [fly.toml](fly.toml); nothing extra to run by hand.
 5. Create the first admin user: `fly ssh console -C "python manage.py
    createsuperuser"`.
+6. Set up database backups. Supabase's free plan takes none, so
+   [.github/workflows/db-backup.yml](.github/workflows/db-backup.yml) runs a
+   daily encrypted `pg_dump` and uploads it to a private Google Drive folder.
+   See [docs/backup-setup.md](docs/backup-setup.md) for the service account,
+   the four secrets it needs, and how to restore.
 
 Both Fly's and Supabase's free tiers change their terms fairly often -
 check current limits before relying on this staying free indefinitely.

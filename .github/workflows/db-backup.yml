@@ -1,0 +1,77 @@
+# Daily pg_dump of the Supabase database, encrypted and pushed to a private
+# Google Drive folder (this repo is public, so workflow artifacts are not a
+# private destination). See docs/backup-setup.md for the four secrets this
+# needs and how to restore.
+
+name: Database backup
+on:
+  schedule:
+    - cron: '17 3 * * *'   # 03:17 UTC daily
+  workflow_dispatch: {}
+
+concurrency:
+  group: db-backup
+  cancel-in-progress: false
+
+jobs:
+  backup:
+    name: Dump and upload to Drive
+    runs-on: ubuntu-latest
+    if: github.repository == 'jfeliu/doplent'
+    steps:
+      - name: Dump, compress, encrypt
+        env:
+          SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+          BACKUP_PASSPHRASE: ${{ secrets.BACKUP_PASSPHRASE }}
+        run: |
+          : "${SUPABASE_DB_URL:?missing SUPABASE_DB_URL secret}"
+          : "${BACKUP_PASSPHRASE:?missing BACKUP_PASSPHRASE secret}"
+
+          stamp="$(date -u +%Y%m%dT%H%M%SZ)"
+          out="doplent-${stamp}.sql.gz.gpg"
+
+          umask 077
+          pp="$(mktemp)"
+          printf '%s' "$BACKUP_PASSPHRASE" > "$pp"
+
+          # pg_dump from a pinned image so the client is never older than the
+          # Supabase server (an older pg_dump refuses to dump a newer server).
+          # The connection string is passed as an env var, never on argv.
+          docker run --rm -e PGURL="$SUPABASE_DB_URL" postgres:17-alpine \
+            sh -c 'exec pg_dump --no-owner --no-privileges "$PGURL"' \
+            | gzip -9 \
+            | gpg --batch --yes --symmetric --cipher-algo AES256 \
+                  --pinentry-mode loopback --passphrase-file "$pp" \
+                  --output "$out"
+
+          rm -f "$pp"
+          ls -lh "$out"
+          echo "out=$out" >> "$GITHUB_ENV"
+
+      - name: Install rclone
+        run: |
+          curl -fsSL -o rclone.zip https://downloads.rclone.org/rclone-current-linux-amd64.zip
+          unzip -q rclone.zip
+          sudo install rclone-*-linux-amd64/rclone /usr/local/bin/rclone
+          rclone version | head -1
+
+      - name: Upload to Google Drive and prune old backups
+        env:
+          RCLONE_CONFIG_GDRIVE_TYPE: drive
+          RCLONE_CONFIG_GDRIVE_SCOPE: drive
+          RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
+          RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_FILE: ${{ runner.temp }}/sa.json
+          GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
+        run: |
+          : "${GDRIVE_SA_KEY:?missing GDRIVE_SA_KEY secret}"
+          : "${RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID:?missing GDRIVE_FOLDER_ID secret}"
+
+          umask 077
+          printf '%s' "$GDRIVE_SA_KEY" > "$RUNNER_TEMP/sa.json"
+
+          rclone copy --no-traverse "$out" gdrive:
+          rclone delete --min-age 365d gdrive:
+          echo "--- current contents ---"
+          rclone lsl gdrive:
+
+          rm -f "$RUNNER_TEMP/sa.json"
