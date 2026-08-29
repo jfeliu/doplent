@@ -583,6 +583,3 @@ msgstr "… o reparteix-lo entre diversos docents"
 
 msgid "Assign a teacher to each part"
 msgstr "Assigna un docent a cada tram"
-
-msgid "UI theme"
-msgstr "Tema visual"
