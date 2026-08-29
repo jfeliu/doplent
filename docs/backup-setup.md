@@ -16,30 +16,31 @@ public repo can be downloaded by anyone. The dump also carries staff personal
 data, so it's GPG symmetric-encrypted (AES-256) on the runner regardless — only
 ciphertext leaves the machine.
 
-## 1. Google Cloud: a service account with Drive access
+## 1. Google Drive: a folder and an OAuth token
 
-1. **console.cloud.google.com** → create a project (or reuse one).
-2. **APIs & Services → Library →** enable the **Google Drive API**.
-3. **APIs & Services → Credentials → Create credentials → Service account.**
-   Any name; no roles needed (it only ever touches one shared folder).
-4. Open the new service account → **Keys → Add key → Create new key → JSON**.
-   A `.json` file downloads — this is the whole credential, keep it safe.
-5. Note the service account's email, `something@your-project.iam.gserviceaccount.com`.
+A *service account* can't be used here — service accounts have no Drive storage
+quota, and the "shared drive" workaround needs Google Workspace. So the workflow
+signs in as your own Google account with a token you generate once.
 
-## 2. Google Drive: a folder shared with it
+1. In your Drive, create a folder, e.g. `Doplent backups`. Open it and copy its
+   ID from the URL — `https://drive.google.com/drive/folders/<THIS-PART>`.
+2. On your laptop, install rclone (`brew install rclone`, `apt install rclone`,
+   or <https://rclone.org/downloads/>) and run `rclone authorize "drive"`.
+   Answer the prompts: leave `client_id` / `client_secret` blank (uses rclone's
+   own), choose scope **`drive`** (full access), leave the rest at defaults.
 
-1. In *your own* Drive, create a folder, e.g. `Doplent backups`.
-2. Share it with the service account email from step 1.5, role **Editor**.
-3. Open the folder and copy its ID from the URL —
-   `https://drive.google.com/drive/folders/<THIS-PART>`.
+   It opens a browser — sign in as the Google account that owns the folder and
+   approve access. When it finishes it prints a JSON blob:
 
-The files land in your Drive and count against your 15 GB (a dump is a few KB).
-They're *owned by the service account*, not you: you can view and download them,
-but if you ever delete the service account, delete them first or they're
-orphaned. For backups that trade-off is fine and the setup needs no
-expiry-prone OAuth token.
+   ```
+   {"access_token":"ya29...","token_type":"Bearer","refresh_token":"1//...","expiry":"..."}
+   ```
 
-## 3. GitHub: four repository secrets
+   Copy that whole line (the token). It uses rclone's published OAuth client, so
+   the refresh token stays valid as long as it's used at least every 6 months —
+   a daily cron keeps it alive.
+
+## 2. GitHub: four repository secrets
 
 **Settings → Secrets and variables → Actions → New repository secret.**
 
@@ -47,8 +48,8 @@ expiry-prone OAuth token.
 | --- | --- |
 | `SUPABASE_DB_URL` | The **Session pooler** URI (port `5432`) from Supabase → Project Settings → Database → Connection string, with the password filled in. |
 | `BACKUP_PASSPHRASE` | A strong random string. **Store it in your password manager** — lose it and every backup is unrecoverable. `python -c 'import secrets; print(secrets.token_urlsafe(32))'` |
-| `GDRIVE_SA_KEY` | The entire contents of the service-account JSON file from step 1.4. |
-| `GDRIVE_FOLDER_ID` | The folder ID from step 2.3. |
+| `GDRIVE_TOKEN` | The full JSON token line from step 1.2. |
+| `GDRIVE_FOLDER_ID` | The folder ID from step 1.1. |
 
 On `SUPABASE_DB_URL`, don't use the other two connection options: the **direct**
 connection (`db.<ref>.supabase.co`) is IPv6-only and GitHub's runners have no
@@ -59,7 +60,7 @@ right for the app, wrong for `pg_dump`).
 Then run it once from **Actions → Database backup → Run workflow** to confirm
 the whole chain works.
 
-## 4. Restoring
+## 3. Restoring
 
 Download the dump you want from the Drive folder, then:
 

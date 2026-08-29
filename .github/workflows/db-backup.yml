@@ -60,22 +60,21 @@ jobs:
           rclone version | head -1
 
       - name: Upload to Google Drive and prune old backups
+        # Personal Gmail accounts can't use a service account here (service
+        # accounts have no Drive storage quota, and shared drives need Google
+        # Workspace) — so this authenticates as your own account with an OAuth
+        # token generated once by `rclone authorize "drive"`. Files are owned by
+        # you and count against your 15 GB.
         env:
           RCLONE_CONFIG_GDRIVE_TYPE: drive
           RCLONE_CONFIG_GDRIVE_SCOPE: drive
           RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: ${{ secrets.GDRIVE_FOLDER_ID }}
-          RCLONE_CONFIG_GDRIVE_SERVICE_ACCOUNT_FILE: ${{ runner.temp }}/sa.json
-          GDRIVE_SA_KEY: ${{ secrets.GDRIVE_SA_KEY }}
+          RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.GDRIVE_TOKEN }}
         run: |
-          : "${GDRIVE_SA_KEY:?missing GDRIVE_SA_KEY secret}"
+          : "${RCLONE_CONFIG_GDRIVE_TOKEN:?missing GDRIVE_TOKEN secret}"
           : "${RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID:?missing GDRIVE_FOLDER_ID secret}"
-
-          umask 077
-          printf '%s' "$GDRIVE_SA_KEY" > "$RUNNER_TEMP/sa.json"
 
           rclone copy --no-traverse "$out" gdrive:
           rclone delete --min-age 365d gdrive:
           echo "--- current contents ---"
           rclone lsl gdrive:
-
-          rm -f "$RUNNER_TEMP/sa.json"
