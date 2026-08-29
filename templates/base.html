@@ -54,6 +54,13 @@
       gap: .5rem;
     }
     .navbar-brand i { color: var(--bs-primary); font-size: 1.15rem; }
+    .navbar-brand .brand-text { display: flex; flex-direction: column; line-height: 1.15; }
+    .navbar-brand .brand-tagline {
+      font-weight: 400;
+      font-size: .7rem;
+      letter-spacing: 0;
+      color: #8a8ba0;
+    }
     .navbar .nav-link {
       font-weight: 500;
       color: #55566b !important;
@@ -160,7 +167,11 @@
   <nav class="navbar navbar-expand-lg mb-4">
     <div class="container">
       <a class="navbar-brand" href="{% url 'dashboard' %}">
-        <i class="bi bi-calendar2-check"></i>{% translate "Doplent" %}
+        <i class="bi bi-calendar2-check"></i>
+        <span class="brand-text">
+          <span>{% translate "Doplent" %}</span>
+          <span class="brand-tagline">{% translate "Find a sub before the bell" %}</span>
+        </span>
       </a>
       <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarContent" aria-controls="navbarContent" aria-expanded="false" aria-label="{% translate "Toggle navigation" %}">
         <span class="navbar-toggler-icon"></span>

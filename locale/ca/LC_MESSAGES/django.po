@@ -143,6 +143,9 @@ msgstr "hores setmanals sense docència"
 msgid "Doplent"
 msgstr "Doplent"
 
+msgid "Find a sub before the bell"
+msgstr "Troba el teu docent suplent"
+
 msgid "Doplent admin"
 msgstr "Doplent admin"
 
