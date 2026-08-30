@@ -68,10 +68,22 @@ def accept_offer(offer: SubstitutionOffer) -> Substitution | None:
     return substitution
 
 
-def decline_offer(offer: SubstitutionOffer) -> bool:
-    """Mark `offer` declined. Returns whether it was actually pending (and so
+def decline_offer(offer: SubstitutionOffer, reason: str = "", detail: str = "") -> bool:
+    """Mark `offer` declined, recording why (a SubstitutionOffer.DeclineReason
+    value and/or free text). Returns whether it was actually pending (and so
     really got declined) - False if it had already been responded to."""
+    now = timezone.now()
     updated = SubstitutionOffer.objects.filter(pk=offer.pk, status=SubstitutionOffer.Status.PENDING).update(
-        status=SubstitutionOffer.Status.DECLINED, responded_at=timezone.now()
+        status=SubstitutionOffer.Status.DECLINED,
+        responded_at=now,
+        decline_reason=reason,
+        decline_reason_detail=detail,
     )
+    if updated:
+        # Keep the passed instance in step with the row, so callers can read the
+        # reason back (e.g. to render the notification email) without refetching.
+        offer.status = SubstitutionOffer.Status.DECLINED
+        offer.responded_at = now
+        offer.decline_reason = reason
+        offer.decline_reason_detail = detail
     return bool(updated)

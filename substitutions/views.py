@@ -8,7 +8,7 @@ from django.utils.translation import ngettext
 from teachers.models import Teacher
 
 from . import emails
-from .forms import AbsenceForm
+from .forms import AbsenceForm, DeclineOfferForm
 from .models import Absence, Substitution, SubstitutionOffer
 from .offers import accept_offer, create_offer, decline_offer, expire_stale_offers
 from .services import build_coverage_grid, can_offer, grid_slots, uncovered_ranges
@@ -134,6 +134,7 @@ def _contiguous_runs(indexes):
 def respond_to_offer(request, offer_id):
     teacher = get_object_or_404(Teacher, user=request.user)
     offer = get_object_or_404(SubstitutionOffer, pk=offer_id, substitute_teacher=teacher)
+    decline_form = DeclineOfferForm()
 
     if request.method == "POST" and offer.status == SubstitutionOffer.Status.PENDING:
         action = request.POST.get("action")
@@ -145,10 +146,19 @@ def respond_to_offer(request, offer_id):
                 messages.info(request, _("You're confirmed to cover this."))
             else:
                 messages.info(request, _("Sorry - this slot is no longer available."))
+            return redirect("dashboard")
         elif action == "decline":
-            if decline_offer(offer):
-                emails.send_offer_declined_notification(offer)
-                messages.info(request, _("You've declined this offer."))
-        return redirect("dashboard")
+            decline_form = DeclineOfferForm(request.POST)
+            if decline_form.is_valid():
+                if decline_offer(
+                    offer, decline_form.cleaned_data["reason"], decline_form.cleaned_data["detail"]
+                ):
+                    emails.send_offer_declined_notification(offer)
+                    messages.info(request, _("You've declined this offer."))
+                return redirect("dashboard")
 
-    return render(request, "substitutions/respond_to_offer.html", {"offer": offer})
+    return render(
+        request,
+        "substitutions/respond_to_offer.html",
+        {"offer": offer, "decline_form": decline_form},
+    )

@@ -1,0 +1,168 @@
+{% extends "admin/base_site.html" %}
+{% load i18n l10n %}
+
+{% block extrastyle %}
+{{ block.super }}
+<style>
+  .stats-intro { color: var(--body-quiet-color); margin: 0 0 1.5rem; }
+
+  .stat-cards {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+    gap: 1rem;
+    margin-bottom: 2rem;
+  }
+  .stat-card {
+    border: 1px solid var(--hairline-color);
+    border-radius: 8px;
+    padding: 1rem 1.1rem;
+    background: var(--body-bg);
+  }
+  .stat-card .value { font-size: 1.8rem; font-weight: 700; line-height: 1.1; }
+  .stat-card .label { color: var(--body-quiet-color); font-size: .8rem; margin-top: .3rem; }
+  .stat-card .sub { color: var(--body-quiet-color); font-size: .78rem; margin-top: .45rem; }
+
+  .stat-tables { display: grid; grid-template-columns: repeat(auto-fit, minmax(19rem, 1fr)); gap: 1.25rem; }
+  .stat-tables .module { margin: 0; }
+  .stat-tables table { width: 100%; }
+  .stat-tables td.num, .stat-tables th.num { text-align: right; white-space: nowrap; }
+
+  .bar-track { display: inline-block; width: 6rem; height: .5rem; border-radius: 3px; background: var(--darkened-bg); vertical-align: middle; margin-right: .5rem; overflow: hidden; }
+  .bar-fill { display: block; height: 100%; background: var(--primary); }
+
+  .coverage-meter { display: flex; align-items: baseline; gap: .6rem; }
+  .coverage-meter .big { font-size: 2.2rem; font-weight: 700; }
+</style>
+{% endblock %}
+
+{% block breadcrumbs %}
+<div class="breadcrumbs">
+  <a href="{% url 'admin:index' %}">{% translate "Home" %}</a>
+  &rsaquo; <a href="{% url 'admin:app_list' app_label=opts.app_label %}">{{ opts.app_config.verbose_name }}</a>
+  &rsaquo; <a href="{% url 'admin:substitutions_absence_changelist' %}">{% translate "Absences" %}</a>
+  &rsaquo; {{ title }}
+</div>
+{% endblock %}
+
+{% block content %}
+<p class="stats-intro">
+  {% blocktranslate with start=stats.course_start|date:"DATE_FORMAT" %}Totals for the current course year, counting from {{ start }}.{% endblocktranslate %}
+  {% blocktranslate with when=stats.generated_at|date:"SHORT_DATETIME_FORMAT" %}Generated {{ when }}.{% endblocktranslate %}
+</p>
+
+<div class="stat-cards">
+  <div class="stat-card">
+    <div class="value">{{ stats.totals.absences }}</div>
+    <div class="label">{% translate "Absences reported" %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="value">{{ stats.totals.substitutions }}</div>
+    <div class="label">{% translate "Substitutions confirmed" %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="value">{{ stats.totals.hours_covered }}</div>
+    <div class="label">{% translate "Total time covered" %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="value">{{ stats.totals.offers }}</div>
+    <div class="label">{% translate "Offers sent" %}</div>
+    {% if stats.offers.avg_response %}<div class="sub">{% blocktranslate with t=stats.offers.avg_response %}~{{ t }} to reply{% endblocktranslate %}</div>{% endif %}
+  </div>
+  <div class="stat-card">
+    <div class="value">{{ stats.offers.acceptance_rate }}%</div>
+    <div class="label">{% translate "Offer acceptance rate" %}</div>
+    <div class="sub">{% translate "of offers that got a yes/no" %}</div>
+  </div>
+  <div class="stat-card">
+    <div class="value">{{ stats.totals.active_teachers }}</div>
+    <div class="label">{% translate "Active teachers" %}</div>
+  </div>
+</div>
+
+<div class="module" style="margin-bottom: 2rem;">
+  <h2>{% translate "Coverage" %}</h2>
+  <div style="padding: .8rem 1rem;">
+    <div class="coverage-meter">
+      <span class="big">{{ stats.coverage.rate }}%</span>
+      <span>{% blocktranslate with covered=stats.coverage.fully_covered total=stats.totals.absences %}{{ covered }} of {{ total }} absences fully covered{% endblocktranslate %}</span>
+    </div>
+    {% if stats.coverage.not_fully_covered %}
+    <p style="color: var(--body-quiet-color); margin: .5rem 0 0;">
+      {% blocktranslate with n=stats.coverage.not_fully_covered %}{{ n }} still have a gap.{% endblocktranslate %}
+    </p>
+    {% endif %}
+  </div>
+</div>
+
+<div class="stat-tables">
+  <div class="module">
+    <h2>{% translate "Offer outcomes" %}</h2>
+    <table>
+      <thead><tr><th>{% translate "Status" %}</th><th class="num">{% translate "Count" %}</th><th class="num">%</th></tr></thead>
+      <tbody>
+        {% for row in stats.offers.status_rows %}
+        <tr>
+          <td>{{ row.label }}</td>
+          <td class="num">{{ row.count }}</td>
+          <td class="num"><span class="bar-track"><span class="bar-fill" style="width: {% localize off %}{{ row.pct }}{% endlocalize %}%;"></span></span>{{ row.pct }}%</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module">
+    <h2>{% translate "Why offers were declined" %}</h2>
+    <table>
+      <tbody>
+        {% for row in stats.decline_reasons %}
+        <tr><td>{{ row.label }}</td><td class="num">{{ row.count }}</td></tr>
+        {% empty %}
+        <tr><td colspan="2" style="color: var(--body-quiet-color);">{% translate "No declines with a recorded reason yet." %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module">
+    <h2>{% translate "Absence reasons" %}</h2>
+    <table>
+      <tbody>
+        {% for row in stats.absence_reasons %}
+        <tr><td>{{ row.label }}</td><td class="num">{{ row.count }}</td></tr>
+        {% empty %}
+        <tr><td colspan="2" style="color: var(--body-quiet-color);">{% translate "No absences yet." %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module">
+    <h2>{% translate "Top substitutes by time covered" %}</h2>
+    <table>
+      <thead><tr><th>{% translate "Teacher" %}</th><th class="num">{% translate "Subs" %}</th><th class="num">{% translate "Time covered" %}</th></tr></thead>
+      <tbody>
+        {% for row in stats.top_substitutes %}
+        <tr><td>{{ row.teacher }}</td><td class="num">{{ row.count }}</td><td class="num">{{ row.time }}</td></tr>
+        {% empty %}
+        <tr><td colspan="3" style="color: var(--body-quiet-color);">{% translate "No substitutions yet." %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div class="module">
+    <h2>{% translate "Most-absent teachers" %}</h2>
+    <table>
+      <thead><tr><th>{% translate "Teacher" %}</th><th class="num">{% translate "Absences" %}</th></tr></thead>
+      <tbody>
+        {% for row in stats.busiest_absentees %}
+        <tr><td>{{ row.teacher }}</td><td class="num">{{ row.count }}</td></tr>
+        {% empty %}
+        <tr><td colspan="2" style="color: var(--body-quiet-color);">{% translate "No absences yet." %}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endblock %}

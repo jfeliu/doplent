@@ -13,17 +13,33 @@
 </div>
 
 {% if offer.status == "pending" %}
-<div class="d-flex gap-2">
-  <form method="post">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="accept">
-    <button type="submit" class="btn btn-success"><i class="bi bi-check-circle-fill"></i> {% translate "Accept" %}</button>
-  </form>
-  <form method="post">
-    {% csrf_token %}
-    <input type="hidden" name="action" value="decline">
-    <button type="submit" class="btn btn-outline-danger"><i class="bi bi-x-circle"></i> {% translate "Decline" %}</button>
-  </form>
+<form method="post" class="mb-3">
+  {% csrf_token %}
+  <input type="hidden" name="action" value="accept">
+  <button type="submit" class="btn btn-success"><i class="bi bi-check-circle-fill"></i> {% translate "Accept" %}</button>
+</form>
+
+<div class="card border-danger-subtle">
+  <div class="card-body">
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="decline">
+      <p class="fw-semibold mb-2">{% translate "Can't make it? Let them know why:" %}</p>
+      {% for radio in decline_form.reason %}
+        <div class="form-check">
+          {{ radio.tag }}
+          <label class="form-check-label" for="{{ radio.id_for_label }}">{{ radio.choice_label }}</label>
+        </div>
+      {% endfor %}
+      {% for error in decline_form.reason.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      <div class="mt-2">
+        <label class="form-label small text-muted mb-1" for="{{ decline_form.detail.id_for_label }}">{% translate "Details (required if you pick “Other”)" %}</label>
+        {{ decline_form.detail }}
+        {% for error in decline_form.detail.errors %}<div class="text-danger small">{{ error }}</div>{% endfor %}
+      </div>
+      <button type="submit" class="btn btn-outline-danger mt-3"><i class="bi bi-x-circle"></i> {% translate "Decline" %}</button>
+    </form>
+  </div>
 </div>
 {% else %}
 <div class="alert alert-info d-flex align-items-center gap-2">
@@ -31,7 +47,7 @@
   {% if offer.status == "accepted" %}
     {% translate "You already accepted this request." %}
   {% elif offer.status == "declined" %}
-    {% translate "You already declined this request." %}
+    {% translate "You already declined this request." %}{% if offer.decline_reason_label %} <span class="text-muted">({{ offer.decline_reason_label }})</span>{% endif %}
   {% else %}
     {% translate "This request is no longer available." %}
   {% endif %}

@@ -71,6 +71,12 @@ class SubstitutionOffer(models.Model):
         DECLINED = "declined", _("Declined")
         EXPIRED = "expired", _("Expired")
 
+    class DeclineReason(models.TextChoices):
+        INTERVIEW = "interview", _("Interview")
+        MEETING = "meeting", _("Meeting")
+        PERSONAL = "personal", _("Personal reasons")
+        OTHER = "other", _("Other")
+
     absence = models.ForeignKey(Absence, on_delete=models.CASCADE, related_name="offers")
     substitute_teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name="substitution_offers")
     start_datetime = models.DateTimeField(verbose_name=_("offered from"))
@@ -80,6 +86,12 @@ class SubstitutionOffer(models.Model):
     )
     created_at = models.DateTimeField(auto_now_add=True, verbose_name=_("offered at"))
     responded_at = models.DateTimeField(null=True, blank=True, verbose_name=_("responded at"))
+    decline_reason = models.CharField(
+        max_length=20, choices=DeclineReason.choices, blank=True, verbose_name=_("decline reason")
+    )
+    decline_reason_detail = models.CharField(
+        max_length=255, blank=True, verbose_name=_("decline reason detail")
+    )
     resulting_substitution = models.OneToOneField(
         Substitution,
         on_delete=models.SET_NULL,
@@ -106,3 +118,16 @@ class SubstitutionOffer(models.Model):
 
     def __str__(self):
         return f"{self.substitute_teacher} offered {self.absence} ({self.get_status_display()})"
+
+    @property
+    def decline_reason_label(self):
+        """The decline reason as one human-readable string: the free-text
+        detail on its own when "Other" was picked, the preset's label
+        otherwise (with the detail appended in parentheses if also given).
+        Empty when the offer wasn't declined with a reason."""
+        if self.decline_reason == self.DeclineReason.OTHER:
+            return self.decline_reason_detail
+        if not self.decline_reason:
+            return self.decline_reason_detail
+        label = self.get_decline_reason_display()
+        return f"{label} ({self.decline_reason_detail})" if self.decline_reason_detail else label

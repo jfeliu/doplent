@@ -576,5 +576,119 @@ msgstr[1] "S'han enviat %(count)s ofertes."
 msgid "Previously declined"
 msgstr "Rebutjada anteriorment"
 
-msgid "A decision is pending for this period"
-msgstr "Hi ha una decisió pendent per a aquest període"
+msgid "Offer sent, awaiting a reply"
+msgstr "Oferta enviada, esperant resposta"
+
+msgid "Locked while an offer for this period is pending"
+msgstr "Bloquejat mentre hi ha una oferta pendent per a aquest període"
+
+msgid "Interview"
+msgstr "Entrevista"
+
+msgid "Meeting"
+msgstr "Reunió"
+
+msgid "Personal reasons"
+msgstr "Motius personals"
+
+msgid "Other"
+msgstr "Altres"
+
+msgid "Reason"
+msgstr "Motiu"
+
+msgid "Details"
+msgstr "Detalls"
+
+msgid "Add a short reason."
+msgstr "Afegeix un motiu breu."
+
+msgid "Can't make it? Let them know why:"
+msgstr "No pots venir? Fes-los saber per què:"
+
+msgid "Details (required if you pick “Other”)"
+msgstr "Detalls (obligatori si tries «Altres»)"
+
+#, python-format
+msgid "Reason given: %(reason)s"
+msgstr "Motiu indicat: %(reason)s"
+
+msgid "Stats dashboard"
+msgstr "Tauler d'estadístiques"
+
+#, python-format
+msgid "Totals for the current course year, counting from %(start)s."
+msgstr "Totals del curs actual, comptant des del %(start)s."
+
+#, python-format
+msgid "Generated %(when)s."
+msgstr "Generat el %(when)s."
+
+msgid "Absences reported"
+msgstr "Absències notificades"
+
+msgid "Substitutions confirmed"
+msgstr "Substitucions confirmades"
+
+msgid "Total time covered"
+msgstr "Temps total cobert"
+
+msgid "Offers sent"
+msgstr "Ofertes enviades"
+
+#, python-format
+msgid "~%(t)s to reply"
+msgstr "~%(t)s per respondre"
+
+msgid "Offer acceptance rate"
+msgstr "Taxa d'acceptació d'ofertes"
+
+msgid "of offers that got a yes/no"
+msgstr "de les ofertes amb resposta"
+
+msgid "Active teachers"
+msgstr "Docents actius"
+
+msgid "Coverage"
+msgstr "Cobertura"
+
+#, python-format
+msgid "%(covered)s of %(total)s absences fully covered"
+msgstr "%(covered)s de %(total)s absències cobertes del tot"
+
+#, python-format
+msgid "%(n)s still have a gap."
+msgstr "%(n)s encara tenen un buit."
+
+msgid "Offer outcomes"
+msgstr "Resultats de les ofertes"
+
+msgid "Why offers were declined"
+msgstr "Per què es van rebutjar les ofertes"
+
+msgid "No declines with a recorded reason yet."
+msgstr "Encara no hi ha rebuigs amb un motiu registrat."
+
+msgid "Absence reasons"
+msgstr "Motius d'absència"
+
+msgid "No absences yet."
+msgstr "Encara no hi ha absències."
+
+msgid "Top substitutes by time covered"
+msgstr "Docents suplents amb més temps cobert"
+
+msgid "Subs"
+msgstr "Subst."
+
+msgid "Time covered"
+msgstr "Temps cobert"
+
+msgid "No substitutions yet."
+msgstr "Encara no hi ha substitucions."
+
+msgid "Most-absent teachers"
+msgstr "Docents amb més absències"
+
+msgid "Unspecified"
+msgstr "Sense especificar"

@@ -1,1 +1,3 @@
-{% load i18n ca_dates %}{% blocktranslate with teacher=offer.substitute_teacher timeframe=offer.start_datetime|ca_timeframe:offer.end_datetime %}{{ teacher }} can't cover your absence for {{ timeframe }}. Pick another substitute from your dashboard.{% endblocktranslate %}
+{% load i18n ca_dates %}{% blocktranslate with teacher=offer.substitute_teacher timeframe=offer.start_datetime|ca_timeframe:offer.end_datetime %}{{ teacher }} can't cover your absence for {{ timeframe }}.{% endblocktranslate %}
+{% if offer.decline_reason_label %}{% blocktranslate with reason=offer.decline_reason_label %}Reason given: {{ reason }}{% endblocktranslate %}
+{% endif %}{% translate "Pick another substitute from your dashboard." %}

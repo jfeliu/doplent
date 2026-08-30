@@ -1,6 +1,6 @@
 from datetime import date, datetime, time, timedelta
 
-from django.db.models import DurationField, ExpressionWrapper, F, Sum
+from django.db.models import DurationField, ExpressionWrapper, F, Q, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
@@ -29,6 +29,19 @@ WORKING_HOURS: list[tuple[time, time]] = [
 # any other day.
 SCHOOL_WEEKDAYS: frozenset[int] = frozenset({0, 1, 2, 3, 4})
 
+# The school year starts on 1 September. Fairness counters (how much each
+# teacher has already substituted) and the admin stats all count from the
+# most recent 1 September, so the load resets every course.
+COURSE_START_MONTH = 9
+
+
+def course_year_start(today: date | None = None) -> datetime:
+    """Midnight (local) on 1 September of the current school year - the most
+    recent 1 September on or before `today`."""
+    today = today or timezone.localdate()
+    year = today.year if today.month >= COURSE_START_MONTH else today.year - 1
+    return timezone.make_aware(datetime(year, COURSE_START_MONTH, 1))
+
 
 def format_duration(td: timedelta) -> str:
     """Render a timedelta as a compact "1h 30m" / "45m" / "2h" string."""
@@ -43,15 +56,17 @@ def format_duration(td: timedelta) -> str:
 
 def _with_coverage_done(teachers):
     """Annotate a Teacher queryset with `coverage_done`: the summed duration of
-    every substitution the teacher has already done, as a timedelta (0 for
-    teachers who've done none)."""
+    the substitutions the teacher has done since the start of the current
+    course year (see `course_year_start`), as a timedelta (0 for teachers who've
+    done none). Last year's load doesn't carry over."""
     return teachers.annotate(
         coverage_done=Coalesce(
             Sum(
                 ExpressionWrapper(
                     F("substitutions_done__end_datetime") - F("substitutions_done__start_datetime"),
                     output_field=DurationField(),
-                )
+                ),
+                filter=Q(substitutions_done__start_datetime__gte=course_year_start()),
             ),
             timedelta(),
             output_field=DurationField(),
@@ -208,8 +223,8 @@ def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) ->
     Each returned Teacher carries `disruption_priority` (the priority of the
     least-available kind of non-teaching time they'd have to be pulled off, per
     NonTeachingHoursPriority), `is_fully_free` (that kind is the top-priority
-    one), `coverage_kind_label` (its translated label), `coverage_done` (total
-    time they've already covered, as a timedelta) and `coverage_done_label`
+    one), `coverage_kind_label` (its translated label), `coverage_done` (time
+    covered so far this course year, as a timedelta) and `coverage_done_label`
     (that duration rendered "1h 30m"), alongside `same_grade` and
     `already_substituting`."""
     segments = _coverage_segments(absence, start_dt, end_dt)
@@ -267,8 +282,8 @@ def find_available_substitutes(absence: Absence) -> list[Teacher]:
     selectable), then by how disruptive pulling them in would be (free time
     first, then paperwork, co-teaching, escolta'm - the order is configurable
     via NonTeachingHoursPriority), then by least substitution time already
-    covered (the summed duration of their past substitutions, ascending), then
-    name. Eligibility requires: not the absent teacher, active, some combination
+    covered this course year (ascending), then name. Eligibility requires: not
+    the absent teacher, active, some combination
     of non-teaching blocks (any kind) covering the whole requested window, and
     not out themselves (own absence) during it.
 
@@ -336,6 +351,14 @@ def _is_slot_aligned(value: datetime) -> bool:
 
 def _overlaps(intervals, start, end) -> bool:
     return any(i_start < end and i_end > start for i_start, i_end in intervals)
+
+
+def _overlapping_reason(intervals, start, end) -> str:
+    """First label from `(start, end, label)` triples that overlaps [start, end)."""
+    for i_start, i_end, label in intervals:
+        if i_start < end and i_end > start:
+            return label
+    return ""
 
 
 def _kind_aware_blocks(teacher: Teacher, weekday: int) -> list[tuple[time, time, str]]:
@@ -427,12 +450,14 @@ def build_coverage_grid(absence: Absence) -> dict:
       columns - [{teacher, same_grade, already_substituting, coverage_done_label,
                   free_minutes, cells}], narrowest availability first, then
                   least time covered, then name; each cell is
-                  {slot_index, state, kind, kind_label, declined} where state is
-                  "free" (selectable; `declined` is True if this teacher turned
-                  a past offer for it down), "pending" (some offer over this
-                  slot is out for a decision - locked for everyone), "busy"
-                  (own confirmed substitution elsewhere), "unavailable" or
-                  "off" (the slot needs no sub)
+                  {slot_index, state, kind, kind_label, declined,
+                  declined_reason} where state is "free" (selectable; `declined`
+                  is True if this teacher turned a past offer for it down, with
+                  `declined_reason` the text they gave), "pending" (this teacher
+                  has an offer out for this slot), "locked" (someone else's offer
+                  is out for it - not selectable by anyone), "busy" (own
+                  confirmed substitution elsewhere), "unavailable" or "off" (the
+                  slot needs no sub)
       rows    - [{slot, reason, reason_label, cells}] - reason_label is set only
                 on the first row of each run of same-reason slots, for a
                 labelled band
@@ -448,17 +473,17 @@ def build_coverage_grid(absence: Absence) -> dict:
         start_datetime__lt=span_end, end_datetime__gt=span_start
     ).values_list("substitute_teacher_id", "start_datetime", "end_datetime"):
         subs_by_teacher.setdefault(teacher_id, []).append((sub_start, sub_end))
-    offers = list(
-        SubstitutionOffer.objects.filter(
-            absence=absence,
-            status__in=(SubstitutionOffer.Status.PENDING, SubstitutionOffer.Status.DECLINED),
-        ).values_list("substitute_teacher_id", "status", "start_datetime", "end_datetime")
-    )
-    pending_intervals = [(s, e) for _, status, s, e in offers if status == SubstitutionOffer.Status.PENDING]
-    declined_by_teacher: dict[int, list[tuple[datetime, datetime]]] = {}
-    for teacher_id, status, offer_start, offer_end in offers:
-        if status == SubstitutionOffer.Status.DECLINED:
-            declined_by_teacher.setdefault(teacher_id, []).append((offer_start, offer_end))
+    pending_by_teacher: dict[int, list[tuple[datetime, datetime]]] = {}
+    for teacher_id, offer_start, offer_end in SubstitutionOffer.objects.filter(
+        absence=absence, status=SubstitutionOffer.Status.PENDING
+    ).values_list("substitute_teacher_id", "start_datetime", "end_datetime"):
+        pending_by_teacher.setdefault(teacher_id, []).append((offer_start, offer_end))
+    pending_intervals = [interval for intervals in pending_by_teacher.values() for interval in intervals]
+    declined_by_teacher: dict[int, list[tuple[datetime, datetime, str]]] = {}
+    for offer in SubstitutionOffer.objects.filter(absence=absence, status=SubstitutionOffer.Status.DECLINED):
+        declined_by_teacher.setdefault(offer.substitute_teacher_id, []).append(
+            (offer.start_datetime, offer.end_datetime, offer.decline_reason_label)
+        )
     # A period with any pending offer is locked for everyone until it resolves.
     pending_slots = {
         slot["index"]
@@ -471,11 +496,12 @@ def build_coverage_grid(absence: Absence) -> dict:
     for teacher in pool:
         day_blocks_cache: dict[int, list[tuple[time, time, str]]] = {}
         teacher_subs = subs_by_teacher.get(teacher.pk, [])
+        teacher_pending = pending_by_teacher.get(teacher.pk, [])
         teacher_declined = declined_by_teacher.get(teacher.pk, [])
         cells, free_minutes = [], 0
         for slot in slots:
             if slot["reason"] is not None:
-                cells.append({"slot_index": slot["index"], "state": "off", "kind": "", "kind_label": "", "declined": False})
+                cells.append({"slot_index": slot["index"], "state": "off", "kind": "", "kind_label": "", "declined": False, "declined_reason": ""})
                 continue
             weekday = timezone.localtime(slot["start_datetime"]).weekday()
             if weekday not in day_blocks_cache:
@@ -486,20 +512,32 @@ def build_coverage_grid(absence: Absence) -> dict:
             runs = _merge_blocks([(bs, be) for bs, be, _ in day_blocks])
             is_free = any(r0 <= t0 and r1 >= t1 for r0, r1 in runs)
 
-            kind, declined = "", False
-            if _overlaps(teacher_subs, slot["start_datetime"], slot["end_datetime"]):
-                state = "busy"
-            elif slot["index"] in pending_slots:
-                state = "pending"
-                if is_free:
-                    kinds = [k for bs, be, k in day_blocks if bs < t1 and be > t0]
-                    kind = min(kinds, key=lambda k: priority_by_kind[k])
-            elif is_free:
+            kind, declined, declined_reason = "", False, ""
+            if is_free:
                 kinds = [k for bs, be, k in day_blocks if bs < t1 and be > t0]
                 kind = min(kinds, key=lambda k: priority_by_kind[k])
-                state = "free"
-                declined = _overlaps(teacher_declined, slot["start_datetime"], slot["end_datetime"])
                 free_minutes += 30
+
+            if _overlaps(teacher_subs, slot["start_datetime"], slot["end_datetime"]):
+                state, kind = "busy", ""
+            elif slot["index"] in pending_slots:
+                # "pending" for the teacher the offer went to, "locked" for
+                # everyone else (a decision is out) - both keep the availability
+                # colouring so you can still read who's free.
+                state = (
+                    "pending"
+                    if _overlaps(teacher_pending, slot["start_datetime"], slot["end_datetime"])
+                    else "locked"
+                )
+            elif is_free:
+                state = "free"
+                declined = any(
+                    d_start < slot["end_datetime"] and d_end > slot["start_datetime"]
+                    for d_start, d_end, _ in teacher_declined
+                )
+                declined_reason = _overlapping_reason(
+                    teacher_declined, slot["start_datetime"], slot["end_datetime"]
+                )
             else:
                 state = "unavailable"
             cells.append(
@@ -509,11 +547,13 @@ def build_coverage_grid(absence: Absence) -> dict:
                     "kind": kind,
                     "kind_label": str(NonTeachingHoursKind(kind).label) if kind else "",
                     "declined": declined,
+                    "declined_reason": declined_reason,
                 }
             )
 
         if not any(
-            cell["state"] in ("free", "pending") and cell["slot_index"] in needs_cover for cell in cells
+            cell["state"] in ("free", "pending", "locked") and cell["slot_index"] in needs_cover
+            for cell in cells
         ):
             continue
         columns.append(

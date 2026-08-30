@@ -4,7 +4,7 @@ from django import forms
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from .models import Absence
+from .models import Absence, SubstitutionOffer
 from .services import coverage_needed
 
 WHOLE_DAY_START = time(9, 0)
@@ -85,3 +85,26 @@ class AbsenceForm(forms.ModelForm):
         if commit:
             instance.save()
         return instance
+
+
+class DeclineOfferForm(forms.Form):
+    """Why a teacher is turning down an offer - a preset reason, plus free text
+    that's optional for the presets but required when they pick "Other"."""
+
+    reason = forms.ChoiceField(
+        label=_("Reason"),
+        choices=SubstitutionOffer.DeclineReason.choices,
+        widget=forms.RadioSelect,
+    )
+    detail = forms.CharField(
+        label=_("Details"),
+        required=False,
+        max_length=255,
+        widget=forms.TextInput(attrs={"class": "form-control"}),
+    )
+
+    def clean(self):
+        cleaned = super().clean()
+        if cleaned.get("reason") == SubstitutionOffer.DeclineReason.OTHER and not cleaned.get("detail"):
+            self.add_error("detail", _("Add a short reason."))
+        return cleaned

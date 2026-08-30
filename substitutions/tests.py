@@ -2,20 +2,23 @@ import datetime
 
 from django.contrib.auth.models import User
 from django.core import mail
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
 from teachers.models import NonTeachingHoursKind, NonTeachingHoursPriority, Teacher, WeeklyNonTeachingHours
 
 from .models import Absence, Substitution, SubstitutionOffer
+from .offers import decline_offer
 from .services import (
     build_coverage_grid,
     can_offer,
+    course_year_start,
     find_available_substitutes,
     grid_slots,
     uncovered_ranges,
 )
+from .stats import build_admin_stats
 
 
 def make_teacher(username, grade_level=Teacher.GradeLevel.PRIMARY, active=True, email=""):
@@ -31,6 +34,13 @@ def give_free_all_week(teacher, start=datetime.time(8, 0), end=datetime.time(16,
 
 def dt(year, month, day, hour, minute=0):
     return timezone.make_aware(datetime.datetime(year, month, day, hour, minute))
+
+
+def course_dt(day_offset, hour, minute=0):
+    """A datetime `day_offset` days into the current course year (1 September) -
+    for substitution/absence fixtures that must count toward this year's totals
+    now that fairness counters and stats reset each 1 September."""
+    return (course_year_start() + datetime.timedelta(days=day_offset)).replace(hour=hour, minute=minute)
 
 
 def next_monday_dt(hour, minute=0):
@@ -207,8 +217,8 @@ class FindAvailableSubstitutesTests(TestCase):
         for i in range(3):
             past_absence = Absence.objects.create(
                 teacher=past_absent,
-                start_datetime=dt(2024, 1, 1 + i, 9),
-                end_datetime=dt(2024, 1, 1 + i, 10),
+                start_datetime=course_dt(i, 9),
+                end_datetime=course_dt(i, 10),
             )
             make_substitution(past_absence, busy)
 
@@ -232,14 +242,14 @@ class FindAvailableSubstitutesTests(TestCase):
         for i in range(3):
             short_absence = Absence.objects.create(
                 teacher=past_absent,
-                start_datetime=dt(2024, 1, 1 + i, 9),
-                end_datetime=dt(2024, 1, 1 + i, 9, 30),
+                start_datetime=course_dt(i, 9),
+                end_datetime=course_dt(i, 9, 30),
             )
             make_substitution(short_absence, many_short)
         long_absence = Absence.objects.create(
             teacher=past_absent,
-            start_datetime=dt(2024, 1, 5, 9),
-            end_datetime=dt(2024, 1, 5, 12),
+            start_datetime=course_dt(5, 9),
+            end_datetime=course_dt(5, 12),
         )
         make_substitution(long_absence, few_long)
 
@@ -922,10 +932,21 @@ class PickSubstituteOfferFlowTests(TestCase):
         self._post(offered, 0, 1)  # 9:00-10:00
 
         grid = build_coverage_grid(self.absence)
-        for column in grid["columns"]:
-            states = [c["state"] for c in column["cells"]]
-            self.assertEqual(states[:2], ["pending", "pending"])  # locked for offered and other alike
-            self.assertEqual(states[2:], ["free", "free"])
+        offered_col = next(c for c in grid["columns"] if c["teacher"].pk == offered.pk)
+        other_col = next(c for c in grid["columns"] if c["teacher"].pk == other.pk)
+        # the teacher it went to sees "pending"; everyone else just "locked"
+        self.assertEqual([c["state"] for c in offered_col["cells"]], ["pending", "pending", "free", "free"])
+        self.assertEqual([c["state"] for c in other_col["cells"]], ["locked", "locked", "free", "free"])
+
+    def test_one_bulk_submit_will_not_offer_the_same_period_to_two_teachers(self):
+        a = make_teacher("dup_a", email="a@example.edu")
+        give_free_all_week(a)
+        b = make_teacher("dup_b", email="b@example.edu")
+        give_free_all_week(b)
+
+        self.client.post(self.url, {"cell": [f"{a.pk}:0", f"{b.pk}:0"]})
+
+        self.assertEqual(SubstitutionOffer.objects.filter(absence=self.absence).count(), 1)
 
     def test_a_declined_offer_is_marked_but_still_selectable(self):
         candidate = make_teacher("offer_declined_display", email="candidate@example.edu")
@@ -1039,14 +1060,43 @@ class RespondToOfferViewTests(TestCase):
     def test_decline_notifies_the_reporting_teacher_and_creates_nothing(self):
         self.client.force_login(self.candidate.user)
 
-        response = self.client.post(self.url, {"action": "decline"})
+        response = self.client.post(self.url, {"action": "decline", "reason": "meeting"})
 
         self.assertRedirects(response, reverse("dashboard"))
         self.offer.refresh_from_db()
         self.assertEqual(self.offer.status, SubstitutionOffer.Status.DECLINED)
+        self.assertEqual(self.offer.decline_reason, SubstitutionOffer.DeclineReason.MEETING)
         self.assertFalse(Substitution.objects.filter(absence=self.absence).exists())
         self.assertEqual(len(mail.outbox), 1)
         self.assertEqual(mail.outbox[0].to, ["absent@example.edu"])
+        self.assertIn("Meeting", mail.outbox[0].body)
+
+    def test_decline_requires_a_reason(self):
+        self.client.force_login(self.candidate.user)
+
+        response = self.client.post(self.url, {"action": "decline"})
+
+        self.assertEqual(response.status_code, 200)
+        self.offer.refresh_from_db()
+        self.assertEqual(self.offer.status, SubstitutionOffer.Status.PENDING)
+        self.assertEqual(mail.outbox, [])
+
+    def test_decline_with_other_needs_free_text_detail(self):
+        self.client.force_login(self.candidate.user)
+
+        rejected = self.client.post(self.url, {"action": "decline", "reason": "other"})
+        self.assertEqual(rejected.status_code, 200)
+        self.offer.refresh_from_db()
+        self.assertEqual(self.offer.status, SubstitutionOffer.Status.PENDING)
+
+        accepted = self.client.post(
+            self.url, {"action": "decline", "reason": "other", "detail": "Dentist appointment"}
+        )
+        self.assertRedirects(accepted, reverse("dashboard"))
+        self.offer.refresh_from_db()
+        self.assertEqual(self.offer.status, SubstitutionOffer.Status.DECLINED)
+        self.assertEqual(self.offer.decline_reason_detail, "Dentist appointment")
+        self.assertIn("Dentist appointment", mail.outbox[0].body)
 
     def test_get_on_an_already_responded_offer_shows_read_only_status(self):
         self.offer.status = SubstitutionOffer.Status.DECLINED
@@ -1207,3 +1257,86 @@ class ReportAbsenceFormTests(TestCase):
         response = self._post("09:00", "11:00")
 
         self.assertRedirects(response, reverse("pick_substitute", args=[Absence.objects.get().pk]))
+
+
+@override_settings(LANGUAGE_CODE="en")
+class StatsDashboardTests(TestCase):
+    def setUp(self):
+        self.absent = make_teacher("stats_absent", email="stats_absent@example.edu")
+        self.sub = make_teacher("stats_sub")
+        give_free_all_week(self.sub)
+        # Two absences this course year: one fully covered, one left with a gap.
+        covered = Absence.objects.create(
+            teacher=self.absent, start_datetime=course_dt(1, 9), end_datetime=course_dt(1, 10)
+        )
+        make_substitution(covered, self.sub)
+        self.uncovered = Absence.objects.create(
+            teacher=self.absent, start_datetime=course_dt(2, 9), end_datetime=course_dt(2, 11)
+        )
+        offer = make_offer(self.uncovered, self.sub)
+        decline_offer(offer, SubstitutionOffer.DeclineReason.MEETING)
+
+        # Last year's absence + substitution must not count toward this year.
+        last_year = Absence.objects.create(
+            teacher=self.absent,
+            start_datetime=course_dt(-40, 9),
+            end_datetime=course_dt(-40, 12),
+        )
+        make_substitution(last_year, self.sub)
+
+    def test_build_admin_stats_numbers(self):
+        stats = build_admin_stats()
+
+        # Only this year's two absences / one substitution count - last year's
+        # 3-hour substitution is excluded.
+        self.assertEqual(stats["totals"]["absences"], 2)
+        self.assertEqual(stats["totals"]["substitutions"], 1)
+        self.assertEqual(stats["totals"]["hours_covered"], "1h")
+        self.assertEqual(stats["coverage"]["fully_covered"], 1)
+        self.assertEqual(stats["coverage"]["not_fully_covered"], 1)
+        self.assertEqual(stats["coverage"]["rate"], 50)
+        self.assertIn({"label": "Meeting", "count": 1}, stats["decline_reasons"])
+        self.assertEqual(stats["top_substitutes"][0]["teacher"], self.sub)
+        self.assertEqual(stats["top_substitutes"][0]["count"], 1)
+        self.assertEqual(stats["top_substitutes"][0]["time"], "1h")
+        self.assertEqual(stats["course_start"], course_year_start())
+
+    def test_dashboard_page_renders_for_staff(self):
+        staff = User.objects.create_user("stats_staff", password="pw", is_staff=True, is_superuser=True)
+        self.client.force_login(staff)
+
+        response = self.client.get(reverse("admin:substitutions_stats"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, "Stats dashboard")
+        self.assertContains(response, "50%")  # coverage rate
+        self.assertContains(response, "Meeting")  # decline reason breakdown
+        self.assertContains(response, "stats_sub")  # top substitute
+        self.assertRegex(response.content.decode(), r"Generated .+\d")  # timestamp filled in
+
+    def test_dashboard_page_is_staff_only(self):
+        response = self.client.get(reverse("admin:substitutions_stats"))
+        self.assertEqual(response.status_code, 302)
+        self.assertIn("/admin/login/", response.url)
+
+
+class CourseYearStartTests(SimpleTestCase):
+    def test_september_onwards_is_this_years_september(self):
+        self.assertEqual(
+            course_year_start(datetime.date(2026, 9, 1)),
+            timezone.make_aware(datetime.datetime(2026, 9, 1)),
+        )
+        self.assertEqual(
+            course_year_start(datetime.date(2026, 12, 31)),
+            timezone.make_aware(datetime.datetime(2026, 9, 1)),
+        )
+
+    def test_before_september_is_last_years_september(self):
+        self.assertEqual(
+            course_year_start(datetime.date(2026, 8, 31)),
+            timezone.make_aware(datetime.datetime(2025, 9, 1)),
+        )
+        self.assertEqual(
+            course_year_start(datetime.date(2026, 1, 1)),
+            timezone.make_aware(datetime.datetime(2025, 9, 1)),
+        )

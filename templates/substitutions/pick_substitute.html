@@ -7,7 +7,7 @@
   .cov-scroll { overflow-x: auto; border: 1px solid var(--bs-border-color); border-radius: .6rem; }
   .cov-grid {
     display: grid;
-    grid-template-columns: 3.5rem repeat(var(--cols), minmax(5.5rem, 1fr));
+    grid-template-columns: 6.5rem repeat(var(--cols), minmax(5.5rem, 1fr));
     font-size: .8rem;
     min-width: max-content;
   }
@@ -29,15 +29,23 @@
   .cov-cell.unavailable { background: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,.03) 5px, rgba(0,0,0,.03) 6px); }
   .cov-cell.busy { background: var(--bs-secondary-bg, #e2e3e5); text-align: center; }
   .cov-cell.busy::after { content: "\00D7"; opacity: .5; }
-  .cov-cell.pending {
+  .cov-cell.pending, .cov-cell.locked {
     display: flex; align-items: center; justify-content: center;
     background: color-mix(in srgb, var(--k, #16a34a) 14%, var(--bs-body-bg));
     border-left: 3px solid color-mix(in srgb, var(--k, #16a34a) 45%, var(--bs-body-bg));
-    opacity: .8;
+    color: var(--bs-secondary-color);
   }
-  .cov-cell.pending[data-kind="paperwork"] { --k: #d97706; }
-  .cov-cell.pending[data-kind="co_teaching"] { --k: #2563eb; }
-  .cov-cell.pending[data-kind="escoltam"] { --k: #7c3aed; }
+  .cov-cell.pending { opacity: .85; }
+  .cov-cell.locked { opacity: .55; }
+  .cov-cell.pending[data-kind="paperwork"], .cov-cell.locked[data-kind="paperwork"] { --k: #d97706; }
+  .cov-cell.pending[data-kind="co_teaching"], .cov-cell.locked[data-kind="co_teaching"] { --k: #2563eb; }
+  .cov-cell.pending[data-kind="escoltam"], .cov-cell.locked[data-kind="escoltam"] { --k: #7c3aed; }
+  /* locked but the teacher isn't free then: keep the "unavailable" hatch */
+  .cov-cell.locked.nofree {
+    background: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,.03) 5px, rgba(0,0,0,.03) 6px);
+    border-left: none;
+  }
+  .cov-cell.locked i { font-size: .7em; opacity: .85; }
 
   .cov-band {
     grid-column: 2 / -1;
@@ -46,7 +54,7 @@
     font-size: .72rem; opacity: .65; white-space: nowrap;
   }
   .cov-band span {
-    position: sticky; left: 3.5rem; z-index: 1;
+    position: sticky; left: 6.5rem; z-index: 1;
     padding: .15rem .5rem; background: var(--bs-body-bg); border-radius: .3rem;
   }
   .cov-row-off .cov-time { text-decoration: line-through; }
@@ -75,7 +83,24 @@
   label.cov-cell.selected .cov-fill::after { content: "\2713"; }
 
   .cov-legend { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .75rem; opacity: .8; margin-top: .5rem; }
-  .cov-legend span::before { content: ""; display: inline-block; width: .8em; height: .8em; border-radius: 2px; vertical-align: -.1em; margin-right: .35em; background: var(--k); }
+  .cov-legend.kinds span::before { content: ""; display: inline-block; width: .8em; height: .8em; border-radius: 2px; vertical-align: -.1em; margin-right: .35em; background: var(--k); }
+  /* mini swatches that match the actual grid cells */
+  .cov-legend.markers span { display: inline-flex; align-items: center; gap: .4em; }
+  .cov-legend.markers .sw {
+    display: inline-flex; align-items: center; justify-content: center; flex: none;
+    width: 1.4em; height: 1.4em; border-radius: 3px; font-size: .8em;
+  }
+  .cov-legend.markers .sw.pending,
+  .cov-legend.markers .sw.locked {
+    background: color-mix(in srgb, #16a34a 14%, var(--bs-body-bg));
+    border-left: 3px solid color-mix(in srgb, #16a34a 45%, var(--bs-body-bg));
+  }
+  .cov-legend.markers .sw.locked { opacity: .55; }
+  .cov-legend.markers .sw.declined {
+    background: color-mix(in srgb, #dc2626 12%, var(--bs-body-bg));
+    border-left: 3px solid #dc2626; color: #dc2626;
+  }
+  .cov-legend.markers .sw.busy { background: var(--bs-secondary-bg, #e2e3e5); }
 
   .cov-bar {
     position: sticky; bottom: 0; z-index: 5;
@@ -109,19 +134,22 @@
       {% endfor %}
 
       {% for row in grid.rows %}
-      <div class="cov-time{% if row.reason %} cov-row-off{% endif %}">{{ row.slot.start_datetime|time:"H:i" }}</div>
+      <div class="cov-time{% if row.reason %} cov-row-off{% endif %}">{{ row.slot.start_datetime|time:"H:i" }} - {{ row.slot.end_datetime|time:"H:i" }}</div>
       {% if row.reason %}
       <div class="cov-band"><span>{{ row.reason_label }}</span></div>
       {% else %}
         {% for cell in row.cells %}
           {% if cell.state == 'free' %}
           <label class="cov-cell free{% if cell.declined %} declined{% endif %}" data-kind="{{ cell.kind }}" data-teacher="{{ cell.teacher_id }}" data-slot="{{ row.slot.index }}"
-                 title="{{ cell.kind_label }}{% if cell.declined %} · {% translate 'Previously declined' %}{% endif %}">
+                 title="{{ cell.kind_label }}{% if cell.declined %} · {% translate 'Previously declined' %}{% if cell.declined_reason %}: {{ cell.declined_reason }}{% endif %}{% endif %}">
             <input type="checkbox" name="cell" value="{{ cell.teacher_id }}:{{ row.slot.index }}">
             <span class="cov-fill"></span>
           </label>
           {% elif cell.state == 'pending' %}
-          <div class="cov-cell pending" data-kind="{{ cell.kind }}" title="{% translate 'A decision is pending for this period' %}"><i class="bi bi-hourglass-split"></i></div>
+          <div class="cov-cell pending" data-kind="{{ cell.kind }}" title="{% translate 'Offer sent, awaiting a reply' %}"><i class="bi bi-hourglass-split"></i></div>
+          {% elif cell.state == 'locked' %}
+          <div class="cov-cell locked{% if not cell.kind %} nofree{% endif %}" data-kind="{{ cell.kind }}"
+               title="{% if cell.kind %}{{ cell.kind_label }} · {% endif %}{% translate 'Locked while an offer for this period is pending' %}"><i class="bi bi-lock-fill"></i></div>
           {% else %}
           <div class="cov-cell {{ cell.state }}"></div>
           {% endif %}
@@ -131,11 +159,17 @@
     </div>
   </div>
 
-  <div class="cov-legend">
+  <div class="cov-legend kinds">
     <span style="--k:#16a34a">{% translate "Free" %}</span>
     <span style="--k:#d97706">{% translate "Paperwork" %}</span>
     <span style="--k:#2563eb">{% translate "Co-teaching" %}</span>
     <span style="--k:#7c3aed">{% translate "Escolta'm" %}</span>
+  </div>
+  <div class="cov-legend markers">
+    <span><span class="sw pending"><i class="bi bi-hourglass-split"></i></span> {% translate "Offer sent, awaiting a reply" %}</span>
+    <span><span class="sw locked"><i class="bi bi-lock-fill"></i></span> {% translate "Locked while an offer for this period is pending" %}</span>
+    <span><span class="sw declined">&#10007;</span> {% translate "Previously declined" %}</span>
+    <span><span class="sw busy">&times;</span> {% translate "Already covering another absence" %}</span>
   </div>
 
   <div class="cov-bar">
@@ -204,6 +238,14 @@
     c.addEventListener("click", function (e) {
       e.preventDefault();
       var input = c.querySelector("input");
+      if (!input.checked) {
+        // one teacher per slot: drop any other teacher's pick of this slot
+        cells.forEach(function (other) {
+          if (other !== c && other.dataset.slot === c.dataset.slot) {
+            other.querySelector("input").checked = false;
+          }
+        });
+      }
       input.checked = !input.checked;
       render();
     });
