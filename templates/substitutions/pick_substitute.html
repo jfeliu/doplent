@@ -1,19 +1,212 @@
 {% extends "base.html" %}
-{% load i18n ca_dates %}
+{% load i18n ca_dates l10n %}
 {% block title %}{% translate "Pick a substitute" %}{% endblock %}
+
+{% block extra_head %}
+<style>
+  .cov-scroll { overflow-x: auto; border: 1px solid var(--bs-border-color); border-radius: .6rem; }
+  .cov-grid {
+    display: grid;
+    grid-template-columns: 3.5rem repeat(var(--cols), minmax(5.5rem, 1fr));
+    font-size: .8rem;
+    min-width: max-content;
+  }
+  .cov-grid > div { border-right: 1px solid var(--bs-border-color); border-bottom: 1px solid var(--bs-border-color); }
+  .cov-grid > div:nth-child(1) { position: sticky; left: 0; z-index: 3; background: var(--bs-body-bg); }
+  .cov-head {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--bs-tertiary-bg, #f1f1f8);
+    padding: .4rem .5rem; text-align: center; font-weight: 600; line-height: 1.2;
+  }
+  .cov-head .cov-meta { display: block; font-weight: 400; opacity: .6; font-size: .72rem; margin-top: .1rem; }
+  .cov-head .badge { font-size: .6rem; }
+  .cov-corner { position: sticky; top: 0; left: 0; z-index: 4; background: var(--bs-body-bg); }
+  .cov-time {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--bs-body-bg); padding: .25rem .4rem; text-align: right;
+    opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+  .cov-cell { min-height: 1.9rem; }
+  .cov-cell.off, .cov-cell.unavailable { background: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,.03) 5px, rgba(0,0,0,.03) 6px); }
+  .cov-cell.busy { background: var(--bs-secondary-bg, #e2e3e5); color: var(--bs-secondary-color); text-align: center; }
+  .cov-cell.busy::after { content: "\00D7"; opacity: .5; }
+  .cov-row-off .cov-time { text-decoration: line-through; }
+
+  label.cov-cell { display: block; cursor: pointer; margin: 0; }
+  label.cov-cell input { position: absolute; opacity: 0; pointer-events: none; }
+  label.cov-cell .cov-fill {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; min-height: 1.9rem;
+    background: color-mix(in srgb, var(--k) 22%, var(--bs-body-bg));
+    border-left: 3px solid var(--k);
+  }
+  label.cov-cell[data-kind="free"] { --k: #16a34a; }
+  label.cov-cell[data-kind="paperwork"] { --k: #d97706; }
+  label.cov-cell[data-kind="co_teaching"] { --k: #2563eb; }
+  label.cov-cell[data-kind="escoltam"] { --k: #7c3aed; }
+  label.cov-cell.pending .cov-fill { opacity: .6; }
+  label.cov-cell.selected .cov-fill {
+    background: var(--k); color: #fff; font-weight: 700;
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,.6);
+  }
+  label.cov-cell.selected .cov-fill::after { content: "\2713"; }
+  label.cov-cell.selected .cov-fill i { display: none; }
+
+  .cov-legend { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .75rem; opacity: .8; margin-top: .5rem; }
+  .cov-legend span::before { content: ""; display: inline-block; width: .8em; height: .8em; border-radius: 2px; vertical-align: -.1em; margin-right: .35em; background: var(--k); }
+
+  .cov-bar {
+    position: sticky; bottom: 0; z-index: 5;
+    background: var(--bs-body-bg); border-top: 1px solid var(--bs-border-color);
+    padding: .75rem 0; margin-top: 1rem;
+    display: flex; flex-wrap: wrap; align-items: center; gap: .75rem;
+  }
+</style>
+{% endblock %}
+
 {% block content %}
 <h1 class="h4 mb-1"><i class="bi bi-person-check text-primary me-1"></i>{% translate "Pick a substitute" %}</h1>
 <p class="text-muted mb-3"><i class="bi bi-clock-history me-1"></i>{{ absence.start_datetime|ca_timeframe:absence.end_datetime }}</p>
 
-{% if must_split %}
-<div class="alert alert-info d-flex align-items-center gap-2">
-  <i class="bi bi-signpost-split"></i>
-  {% translate "Some periods have no single teacher free for the whole time - assign a different teacher to each part." %}
+<p class="text-muted small">{% translate "Click free 30-minute blocks in one teacher's column to build a period, then offer it to them. Give one teacher the whole time, or split it between several." %}</p>
+
+{% if grid.columns %}
+<form method="post" id="cov-form">
+  {% csrf_token %}
+  <input type="hidden" name="substitute_id" id="cov-teacher">
+  <input type="hidden" name="slot_start" id="cov-start">
+  <input type="hidden" name="slot_end" id="cov-end">
+
+  <div class="cov-scroll">
+    <div class="cov-grid" style="--cols: {{ grid.columns|length }}">
+      <div class="cov-corner"></div>
+      {% for col in grid.columns %}
+      <div class="cov-head">
+        {{ col.teacher }}
+        {% if not col.same_grade %}<span class="badge bg-warning-subtle text-warning-emphasis" title="{% translate 'Different grade' %}"><i class="bi bi-exclamation-triangle-fill"></i></span>{% endif %}
+        {% if col.already_substituting %}<span class="badge bg-danger-subtle text-danger-emphasis" title="{% translate 'Already covering another absence' %}"><i class="bi bi-slash-circle-fill"></i></span>{% endif %}
+        <span class="cov-meta">{% blocktranslate trimmed with time=col.coverage_done_label %}{{ time }} covered so far{% endblocktranslate %}</span>
+      </div>
+      {% endfor %}
+
+      {% for row in grid.rows %}
+      <div class="cov-time {% if row.slot.reason %}cov-row-off{% endif %}"
+           {% if row.slot.reason == 'outside_working_hours' %}title="{% translate 'Outside school hours' %}"
+           {% elif row.slot.reason == 'requester_free' %}title="{% translate "Requester's own non-working hours" %}"
+           {% elif row.slot.reason == 'covered' %}title="{% translate 'Already covered' %}"{% endif %}>
+        {{ row.slot.start_datetime|time:"H:i" }}
+      </div>
+      {% for cell in row.cells %}
+        {% if cell.state == 'free' or cell.state == 'pending' %}
+        <label class="cov-cell {{ cell.state }}" data-kind="{{ cell.kind }}"
+               data-teacher="{{ cell.teacher_id }}" data-slot="{{ row.slot.index }}"
+               title="{{ cell.kind_label }}{% if cell.state == 'pending' %} · {% translate 'Offer pending' %}{% endif %}">
+          <input type="checkbox">
+          <span class="cov-fill">{% if cell.state == 'pending' %}<i class="bi bi-hourglass-split"></i>{% endif %}</span>
+        </label>
+        {% else %}
+        <div class="cov-cell {{ cell.state }}"></div>
+        {% endif %}
+      {% endfor %}
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="cov-legend">
+    <span style="--k:#16a34a">{% translate "Free" %}</span>
+    <span style="--k:#d97706">{% translate "Paperwork" %}</span>
+    <span style="--k:#2563eb">{% translate "Co-teaching" %}</span>
+    <span style="--k:#7c3aed">{% translate "Escolta'm" %}</span>
+  </div>
+
+  <div class="cov-bar">
+    <span id="cov-summary" class="text-muted">{% translate "Nothing selected" %}</span>
+    <button type="submit" id="cov-submit" class="btn btn-primary btn-sm ms-auto" disabled>{% translate "Offer this period" %}</button>
+  </div>
+</form>
+
+{% localize off %}
+<script id="cov-slots" type="application/json">[
+  {% for slot in grid.slots %}{"start": "{{ slot.start_datetime.isoformat }}", "end": "{{ slot.end_datetime.isoformat }}", "label": "{{ slot.start_datetime|time:'H:i' }}", "endLabel": "{{ slot.end_datetime|time:'H:i' }}"}{% if not forloop.last %},{% endif %}{% endfor %}
+]</script>
+{% endlocalize %}
+<script id="cov-teachers" type="application/json">{
+  {% for col in grid.columns %}"{{ col.teacher.pk }}": "{{ col.teacher|escapejs }}"{% if not forloop.last %},{% endif %}{% endfor %}
+}</script>
+
+<script>
+(function () {
+  var SLOTS = JSON.parse(document.getElementById("cov-slots").textContent);
+  var TEACHERS = JSON.parse(document.getElementById("cov-teachers").textContent);
+  var cells = Array.prototype.slice.call(document.querySelectorAll("label.cov-cell"));
+  var summary = document.getElementById("cov-summary");
+  var submit = document.getElementById("cov-submit");
+  var offerLabel = submit.textContent;
+  var sel = { teacher: null, lo: null, hi: null };
+
+  function render() {
+    var valid = sel.teacher !== null;
+    cells.forEach(function (c) {
+      var mine = c.dataset.teacher === sel.teacher;
+      var i = parseInt(c.dataset.slot, 10);
+      var on = valid && mine && i >= sel.lo && i <= sel.hi;
+      c.classList.toggle("selected", on);
+      c.querySelector("input").checked = on;
+    });
+    if (valid) {
+      var name = TEACHERS[sel.teacher];
+      summary.textContent = name + " · " + SLOTS[sel.lo].label + " – " + SLOTS[sel.hi].endLabel;
+      summary.classList.remove("text-muted");
+      document.getElementById("cov-teacher").value = sel.teacher;
+      document.getElementById("cov-start").value = SLOTS[sel.lo].start;
+      document.getElementById("cov-end").value = SLOTS[sel.hi].end;
+      submit.disabled = false;
+      submit.textContent = offerLabel + " → " + name;
+    } else {
+      summary.textContent = summary.dataset.empty;
+      summary.classList.add("text-muted");
+      submit.disabled = true;
+      submit.textContent = offerLabel;
+    }
+  }
+  summary.dataset.empty = summary.textContent;
+
+  cells.forEach(function (c) {
+    c.addEventListener("click", function (e) {
+      e.preventDefault();
+      var t = c.dataset.teacher;
+      var i = parseInt(c.dataset.slot, 10);
+      if (sel.teacher !== t) {
+        sel = { teacher: t, lo: i, hi: i };
+      } else if (i === sel.lo - 1) {
+        sel.lo = i;
+      } else if (i === sel.hi + 1) {
+        sel.hi = i;
+      } else if (i === sel.lo && sel.lo === sel.hi) {
+        sel = { teacher: null, lo: null, hi: null };
+      } else if (i === sel.lo) {
+        sel.lo = i + 1;
+      } else if (i === sel.hi) {
+        sel.hi = i - 1;
+      } else {
+        sel = { teacher: t, lo: i, hi: i };
+      }
+      render();
+    });
+  });
+  render();
+})();
+</script>
+
+{% else %}
+<div class="alert alert-warning d-flex align-items-center gap-2">
+  <i class="bi bi-exclamation-triangle"></i>
+  {% translate "No eligible substitute is free for any part of this absence." %}
 </div>
 {% endif %}
 
 {% if discarded_periods %}
-<div class="card mb-3">
+<div class="card mt-4">
   <div class="card-header"><i class="bi bi-eye-slash text-muted"></i>{% translate "Periods that don't need a substitute" %}</div>
   <ul class="list-group list-group-flush">
     {% for period in discarded_periods %}
@@ -29,40 +222,4 @@
   </ul>
 </div>
 {% endif %}
-
-<div class="row">
-  <div class="col-md-7 d-flex flex-column gap-4">
-    {% for gap in plan %}
-    <div>
-      <h2 class="h6 mb-2"><i class="bi bi-clock-history text-muted me-1"></i>{% translate "Covering" %} {{ gap.start_datetime|ca_timeframe:gap.end_datetime }}</h2>
-
-      {% if gap.whole %}
-      {% if gap.parts %}<div class="text-muted small mb-2">{% translate "One teacher for the whole period" %}</div>{% endif %}
-      {% include "substitutions/_candidate_list.html" with candidates=gap.whole slot_start=gap.start_datetime slot_end=gap.end_datetime %}
-      {% endif %}
-
-      {% if gap.parts %}
-      <div class="text-muted small mb-2 {% if gap.whole %}mt-3{% endif %}">
-        {% if gap.whole %}{% translate "… or split it between teachers" %}{% else %}{% translate "Assign a teacher to each part" %}{% endif %}
-      </div>
-      <div class="d-flex flex-column gap-3">
-        {% for part in gap.parts %}
-        <div>
-          <div class="fw-semibold small mb-1"><i class="bi bi-arrow-return-right text-muted me-1"></i>{{ part.start_datetime|ca_timeframe:part.end_datetime }}</div>
-          {% include "substitutions/_candidate_list.html" with candidates=part.candidates slot_start=part.start_datetime slot_end=part.end_datetime %}
-        </div>
-        {% endfor %}
-      </div>
-      {% endif %}
-
-      {% if not gap.whole and not gap.parts %}
-      <div class="alert alert-warning d-flex align-items-center gap-2">
-        <i class="bi bi-exclamation-triangle"></i>
-        {% translate "No eligible substitute is available for this time frame." %}
-      </div>
-      {% endif %}
-    </div>
-    {% endfor %}
-  </div>
-</div>
 {% endblock %}

@@ -212,9 +212,6 @@ msgstr "Fora de l'horari escolar"
 msgid "Requester's own non-working hours"
 msgstr "Hores sense docència pròpies de qui notifica l'absència"
 
-msgid "Covering"
-msgstr "Cobrint"
-
 msgid "Free"
 msgstr "Lliure"
 
@@ -230,9 +227,6 @@ msgstr "%(time)s coberts fins ara"
 
 msgid "Choose"
 msgstr "Tria"
-
-msgid "No eligible substitute is available for this time frame."
-msgstr "No hi ha cap substitut/a disponible per a aquest interval horari."
 
 msgid "Report a time frame you can't work"
 msgstr "Notifica un interval horari en què no pots treballar"
@@ -423,17 +417,8 @@ msgstr "%(substitute)s cobrirà la teva absència"
 msgid "%(teacher)s can't cover your absence"
 msgstr "%(teacher)s no pot cobrir la teva absència"
 
-msgid "Awaiting response"
-msgstr "Esperant resposta"
-
-msgid "Previously declined"
-msgstr "Rebutjada anteriorment"
-
 msgid "Choose"
 msgstr "Tria"
-
-msgid "Awaiting confirmation"
-msgstr "Pendent de confirmació"
 
 msgid "Coverage requests for you"
 msgstr "Sol·licituds de substitució per a tu"
@@ -567,17 +552,30 @@ msgstr ""
 "No s'ha pogut llegir el fitxer; desa'l com a CSV UTF-8 i torna-ho a provar."
 
 msgid ""
-"Some periods have no single teacher free for the whole time - assign a "
-"different teacher to each part."
+"Click free 30-minute blocks in one teacher's column to build a period, then "
+"offer it to them. Give one teacher the whole time, or split it between "
+"several."
 msgstr ""
-"Alguns períodes no tenen cap docent lliure tota l'estona: assigna un docent "
-"diferent a cada tram."
+"Clica els blocs de 30 minuts lliures a la columna d'un docent per formar un "
+"període i oferir-l'hi. Dona tot el temps a un sol docent o reparteix-lo "
+"entre diversos."
 
-msgid "One teacher for the whole period"
-msgstr "Un sol docent per a tot el període"
+msgid "Already covered"
+msgstr "Ja cobert"
 
-msgid "… or split it between teachers"
-msgstr "… o reparteix-lo entre diversos docents"
+msgid "Offer pending"
+msgstr "Oferta pendent"
 
-msgid "Assign a teacher to each part"
-msgstr "Assigna un docent a cada tram"
+msgid "Nothing selected"
+msgstr "Res seleccionat"
+
+msgid "Offer this period"
+msgstr "Ofereix aquest període"
+
+msgid "No eligible substitute is free for any part of this absence."
+msgstr ""
+"Cap substitut/a disponible està lliure per a cap part d'aquesta absència."
+
+msgid "That period is no longer available - it may have just been covered."
+msgstr ""
+"Aquest període ja no està disponible; és possible que s'acabi de cobrir."

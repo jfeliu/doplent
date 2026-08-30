@@ -11,7 +11,7 @@ from . import emails
 from .forms import AbsenceForm
 from .models import Absence, Substitution, SubstitutionOffer
 from .offers import accept_offer, create_offer, decline_offer, expire_stale_offers
-from .services import build_coverage_plan, discarded_periods, uncovered_ranges
+from .services import build_coverage_grid, can_offer, discarded_periods, uncovered_ranges
 
 
 @login_required
@@ -73,57 +73,28 @@ def pick_substitute(request, absence_id):
     if not uncovered_ranges(absence):
         return redirect("dashboard")
 
-    plan = build_coverage_plan(absence)
-
     if request.method == "POST":
         slot_start = parse_datetime(request.POST.get("slot_start", ""))
         slot_end = parse_datetime(request.POST.get("slot_end", ""))
-        substitute_id = request.POST.get("substitute_id")
-        candidates = _candidates_for_slot(plan, slot_start, slot_end)
-        chosen = next((c for c in candidates if str(c.pk) == substitute_id), None)
-        if chosen is not None and not chosen.already_substituting:
+        chosen = Teacher.objects.filter(pk=request.POST.get("substitute_id") or 0).first()
+        if chosen is not None and can_offer(absence, chosen, slot_start, slot_end):
             offer, created = create_offer(absence, chosen, slot_start, slot_end)
             if created:
                 emails.send_offer_notification(request, offer)
                 messages.info(request, _("%(teacher)s chosen, awaiting confirmation.") % {"teacher": chosen})
-            return redirect("pick_substitute", absence_id=absence.pk)
-
-    offers_by_key = {
-        (offer.substitute_teacher_id, offer.start_datetime, offer.end_datetime): offer
-        for offer in SubstitutionOffer.objects.filter(
-            absence=absence, status__in=[SubstitutionOffer.Status.PENDING, SubstitutionOffer.Status.DECLINED]
-        ).order_by("created_at")
-    }
-    for start, end, candidates in _iter_slots(plan):
-        for candidate in candidates:
-            candidate.offer = offers_by_key.get((candidate.pk, start, end))
+        else:
+            messages.info(request, _("That period is no longer available - it may have just been covered."))
+        return redirect("pick_substitute", absence_id=absence.pk)
 
     return render(
         request,
         "substitutions/pick_substitute.html",
         {
             "absence": absence,
-            "plan": plan,
-            "must_split": any(not gap["whole"] and gap["parts"] for gap in plan),
+            "grid": build_coverage_grid(absence),
             "discarded_periods": discarded_periods(absence),
         },
     )
-
-
-def _iter_slots(plan):
-    """Every pickable (start, end, candidates) triple in a coverage plan - each
-    gap's whole-gap slot plus every part slot."""
-    for gap in plan:
-        yield gap["start_datetime"], gap["end_datetime"], gap["whole"]
-        for part in gap["parts"]:
-            yield part["start_datetime"], part["end_datetime"], part["candidates"]
-
-
-def _candidates_for_slot(plan, slot_start, slot_end):
-    for start, end, candidates in _iter_slots(plan):
-        if start == slot_start and end == slot_end:
-            return candidates
-    return []
 
 
 @login_required

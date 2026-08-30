@@ -14,13 +14,14 @@ Catalan.
   each weekday when they're at school but not teaching. A block can be flagged
   as *paperwork* — the teacher is still available, just not idle.
 - **Absences** are reported as a start/end datetime plus an optional reason.
-- **Substitutions** record who covers which part of an absence. Most absences
-  need a single substitution, but when no one person is free for the whole
-  window the app splits it into the fewest sub-periods that *can* each be
-  covered, so several teachers together fill the gap.
-- **Substitution offers** gate the above on the candidate's consent: picking a
-  candidate on the substitute-picking page sends them a pending offer (and an
-  email) rather than booking them outright. They accept or reject it from
+- **Substitutions** record who covers which part of an absence. The
+  substitute-picking page is a grid of 30-minute rows across the absence, one
+  column per teacher who's free for some of it; the coverer clicks free blocks
+  in a teacher's column to build a period and offers it to them. One teacher can
+  take the whole absence, or several can each take a stretch.
+- **Substitution offers** gate the above on the candidate's consent: offering a
+  teacher a period on the picker sends them a pending offer (and an email)
+  rather than booking them outright. They accept or reject it from
   their dashboard or the emailed link; only accepting creates the confirmed
   `Substitution`. Several candidates can be offered the same slot in
   parallel — first acceptance wins, the rest auto-expire. See
@@ -34,21 +35,23 @@ Not every minute of a reported absence needs covering. The school only runs
 [substitutions/services.py](substitutions/services.py)), and any stretch that
 falls within the absent teacher's *own* non-teaching hours wasn't a class to
 begin with — so both are excluded before looking for a substitute. When an
-absence spans one of these excluded stretches, it's split around it instead of
-demanding one teacher for the whole window. The substitute-picking page lists
-these excluded periods (and why) alongside the slots that do need a substitute.
+absence spans one of these excluded stretches, those rows are greyed out in the
+grid and listed separately (with why) below it.
 
-Candidate ranking (see [substitutions/services.py](substitutions/services.py)) —
-a teacher is eligible only if they're active, not the absent teacher, free for
-the whole requested window, and not absent themselves. Eligible candidates are
-then ordered by:
+Column ranking (see `build_coverage_grid` in
+[substitutions/services.py](substitutions/services.py)) — a teacher is a column
+whenever they're free for at least one 30-minute slot that still needs a
+substitute. Columns are ordered by:
 
-1. same grade level as the absent teacher (other grades are still shown, just
-   deprioritized),
-2. not already committed to substitute elsewhere in that window (those are shown
-   for visibility but can't be picked),
-3. fully free rather than doing paperwork,
-4. fewest substitutions done so far, then name.
+1. same grade level as the absent teacher (other grades still shown, just later),
+2. narrowest availability in the window first, so a teacher free for only one
+   slot gets grabbed before one who's free all morning,
+3. least substitution time already done (summed duration), then name.
+
+Cells are coloured by the kind of non-teaching block behind them (free,
+paperwork, co-teaching, escolta'm); a teacher already covering another absence
+during a slot shows that slot as busy, and a slot they already have a pending
+offer for is marked.
 
 ## Layout
 

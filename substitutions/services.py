@@ -6,7 +6,9 @@ from django.utils import timezone
 
 from teachers.models import NonTeachingHoursKind, NonTeachingHoursPriority, Teacher
 
-from .models import Absence, Substitution
+from .models import Absence, Substitution, SubstitutionOffer
+
+SLOT = timedelta(minutes=30)
 
 # The school's daily working hours - substitutes are never searched for
 # outside these windows, regardless of any teacher's individual schedule.
@@ -29,6 +31,24 @@ def format_duration(td: timedelta) -> str:
     if hours:
         return f"{hours}h"
     return f"{minutes}m"
+
+
+def _with_coverage_done(teachers):
+    """Annotate a Teacher queryset with `coverage_done`: the summed duration of
+    every substitution the teacher has already done, as a timedelta (0 for
+    teachers who've done none)."""
+    return teachers.annotate(
+        coverage_done=Coalesce(
+            Sum(
+                ExpressionWrapper(
+                    F("substitutions_done__end_datetime") - F("substitutions_done__start_datetime"),
+                    output_field=DurationField(),
+                )
+            ),
+            timedelta(),
+            output_field=DurationField(),
+        )
+    )
 
 
 def _daily_segments(start_dt, end_dt) -> list[tuple[date, time, time]]:
@@ -192,21 +212,8 @@ def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) ->
         ).values_list("substitute_teacher_id", flat=True)
     )
 
-    candidates = (
-        _candidate_pool(absence, start_dt, end_dt)
-        .annotate(
-            coverage_done=Coalesce(
-                Sum(
-                    ExpressionWrapper(
-                        F("substitutions_done__end_datetime") - F("substitutions_done__start_datetime"),
-                        output_field=DurationField(),
-                    )
-                ),
-                timedelta(),
-                output_field=DurationField(),
-            )
-        )
-        .order_by("coverage_done", "user__last_name", "user__first_name")
+    candidates = _with_coverage_done(_candidate_pool(absence, start_dt, end_dt)).order_by(
+        "coverage_done", "user__last_name", "user__first_name"
     )
 
     priority_by_kind = NonTeachingHoursPriority.ordering_map()
@@ -338,93 +345,195 @@ def _merged_intervals_for_range(candidate: Teacher, start_dt, end_dt) -> list[tu
     return intervals
 
 
-def _fewest_covering_chunks(absence: Absence, gap_start, gap_end) -> list[tuple[datetime, datetime]] | None:
-    """Tile [gap_start, gap_end) with as few contiguous chunks as possible,
-    each coverable in full by some available teacher. Partial coverers drive
-    the cut points (greedily extending as far as one can reach from each cut);
-    a teacher free for the whole gap fills any stretch the partial ones can't,
-    as a single trailing chunk. Returns None when the gap can't be tiled at
-    all."""
-    partial: list[tuple[datetime, datetime]] = []
-    spanning = False
-    for candidate in _candidate_pool(absence, gap_start, gap_end):
-        for free_start, free_end in _merged_intervals_for_range(candidate, gap_start, gap_end):
-            if free_start <= gap_start and free_end >= gap_end:
-                spanning = True
-            else:
-                partial.append((free_start, free_end))
-    partial.sort()
+def _slot_span(absence: Absence) -> tuple[datetime, datetime]:
+    """The absence's local-time span snapped out to 30-minute boundaries."""
+    start = timezone.localtime(absence.start_datetime).replace(second=0, microsecond=0)
+    start -= timedelta(minutes=start.minute % 30)
+    end = timezone.localtime(absence.end_datetime).replace(second=0, microsecond=0)
+    if end.minute % 30:
+        end += timedelta(minutes=30 - end.minute % 30)
+    return start, end
 
-    chunks: list[tuple[datetime, datetime]] = []
-    current = gap_start
-    index = 0
-    while current < gap_end:
-        farthest = current
-        while index < len(partial) and partial[index][0] <= current:
-            if partial[index][1] > farthest:
-                farthest = partial[index][1]
-            index += 1
-        if farthest > current:
-            chunks.append((current, min(farthest, gap_end)))
-            current = min(farthest, gap_end)
-        elif spanning:
-            chunks.append((current, gap_end))
-            current = gap_end
+
+def _is_slot_aligned(value: datetime) -> bool:
+    local = timezone.localtime(value)
+    return not (local.minute % 30 or local.second or local.microsecond)
+
+
+def _overlaps(intervals, start, end) -> bool:
+    return any(i_start < end and i_end > start for i_start, i_end in intervals)
+
+
+def _kind_aware_blocks(teacher: Teacher, weekday: int) -> list[tuple[time, time, str]]:
+    return [
+        (nth.start_time, nth.end_time, nth.kind)
+        for nth in teacher.non_teaching_hours.all()
+        if nth.weekday == weekday
+    ]
+
+
+def can_offer(absence: Absence, teacher: Teacher, start_dt, end_dt) -> bool:
+    """Whether `teacher` may be offered `[start_dt, end_dt)` for `absence`: a
+    30-minute-aligned range that genuinely needs a substitute (working hours,
+    not the requester's own free time, not already covered), during which
+    `teacher` is a free, uncommitted, eligible candidate. The picker's grid
+    only offers such ranges; this re-checks a POSTed one."""
+    if not start_dt or not end_dt or start_dt >= end_dt:
+        return False
+    if not _is_slot_aligned(start_dt) or not _is_slot_aligned(end_dt):
+        return False
+    if coverage_needed(absence.teacher, start_dt, end_dt) != [(start_dt, end_dt)]:
+        return False
+    if _overlaps(
+        [(sub.start_datetime, sub.end_datetime) for sub in absence.substitutions.all()], start_dt, end_dt
+    ):
+        return False
+    if not teacher.active or teacher.pk == absence.teacher_id:
+        return False
+    if (
+        Absence.objects.filter(teacher=teacher, start_datetime__lt=end_dt, end_datetime__gt=start_dt)
+        .exclude(pk=absence.pk)
+        .exists()
+    ):
+        return False
+    free = _merged_intervals_for_range(teacher, start_dt, end_dt)
+    if not any(run_start <= start_dt and run_end >= end_dt for run_start, run_end in free):
+        return False
+    return not Substitution.objects.filter(
+        substitute_teacher=teacher, start_datetime__lt=end_dt, end_datetime__gt=start_dt
+    ).exists()
+
+
+def build_coverage_grid(absence: Absence) -> dict:
+    """Data for the substitute-picking grid: 30-minute rows across the whole
+    absence, one column per teacher who is free for at least one slot that
+    still needs a substitute.
+
+      slots   - [{index, start_datetime, end_datetime, reason}] where reason is
+                None (needs a sub), "covered", "outside_working_hours" or
+                "requester_free"
+      columns - [{teacher, same_grade, already_substituting, coverage_done_label,
+                  free_minutes, cells}], narrowest availability first, then
+                  least time covered, then name; each cell is
+                  {slot_index, state, kind, kind_label} with state "free",
+                  "pending" (this teacher has a pending offer over it), "busy"
+                  (own confirmed substitution elsewhere), "unavailable" or "off"
+                  (the slot needs no sub)
+      needs_cover - whether any slot still needs a substitute
+    """
+    span_start, span_end = _slot_span(absence)
+    slot_times: list[tuple[int, datetime, datetime]] = []
+    cursor, index = span_start, 0
+    while cursor < span_end:
+        slot_times.append((index, cursor, cursor + SLOT))
+        cursor += SLOT
+        index += 1
+
+    non_working = _outside_working_hours(span_start, span_end)
+    requester_free = _merged_intervals_for_range(absence.teacher, span_start, span_end)
+    covered = [(sub.start_datetime, sub.end_datetime) for sub in absence.substitutions.all()]
+
+    slots = []
+    for slot_index, slot_start, slot_end in slot_times:
+        if _overlaps(covered, slot_start, slot_end):
+            reason = "covered"
+        elif _overlaps(non_working, slot_start, slot_end):
+            reason = "outside_working_hours"
+        elif _overlaps(requester_free, slot_start, slot_end):
+            reason = "requester_free"
         else:
-            return None
-    return chunks
-
-
-def build_coverage_plan(absence: Absence) -> list[dict]:
-    """Return one entry per gap in `absence` not yet covered by a confirmed
-    Substitution, in chronological order. Each entry is a dict:
-
-      start_datetime, end_datetime - the gap
-      whole    - teachers who can cover the entire gap (as
-                 `find_available_substitutes`); [] when none can
-      parts    - the gap tiled into the fewest chunks that different teachers
-                 could each cover, each a dict with start_datetime /
-                 end_datetime / candidates, ordered longest stretch first;
-                 [] unless splitting between teachers actually helps
-      coverable - whether the gap can be covered at all, whole or split
-
-    `whole` and `parts` are both offered whenever both are possible, so the
-    picker can hand the whole gap to one teacher or split it between several."""
-    plan = []
-    for gap_start, gap_end in uncovered_ranges(absence):
-        whole = _find_available_substitutes_for_range(absence, gap_start, gap_end)
-        whole_pickable = any(not candidate.already_substituting for candidate in whole)
-
-        chunks = _fewest_covering_chunks(absence, gap_start, gap_end) or []
-        chunk_slots = [
-            (start, end, _find_available_substitutes_for_range(absence, start, end))
-            for start, end in chunks
-        ]
-        splittable = len(chunk_slots) > 1 and all(
-            any(not candidate.already_substituting for candidate in candidates)
-            for _, _, candidates in chunk_slots
+            reason = None
+        slots.append(
+            {"index": slot_index, "start_datetime": slot_start, "end_datetime": slot_end, "reason": reason}
         )
-        parts = (
-            [
-                {"start_datetime": start, "end_datetime": end, "candidates": candidates}
-                for start, end, candidates in chunk_slots
-            ]
-            if splittable
-            else []
-        )
-        # Longest stretches first (then chronological), so the picker fills the
-        # big blocks before mopping up the short ones.
-        parts.sort(key=lambda part: (part["start_datetime"] - part["end_datetime"], part["start_datetime"]))
-        if splittable and not whole_pickable:
-            whole = []
+    needs_cover = {slot["index"] for slot in slots if slot["reason"] is None}
 
-        plan.append(
+    priority_by_kind = NonTeachingHoursPriority.ordering_map()
+    subs_by_teacher: dict[int, list[tuple[datetime, datetime]]] = {}
+    for teacher_id, sub_start, sub_end in Substitution.objects.filter(
+        start_datetime__lt=span_end, end_datetime__gt=span_start
+    ).values_list("substitute_teacher_id", "start_datetime", "end_datetime"):
+        subs_by_teacher.setdefault(teacher_id, []).append((sub_start, sub_end))
+    pending_by_teacher: dict[int, list[tuple[datetime, datetime]]] = {}
+    for teacher_id, offer_start, offer_end in SubstitutionOffer.objects.filter(
+        absence=absence, status=SubstitutionOffer.Status.PENDING
+    ).values_list("substitute_teacher_id", "start_datetime", "end_datetime"):
+        pending_by_teacher.setdefault(teacher_id, []).append((offer_start, offer_end))
+
+    columns = []
+    pool = _with_coverage_done(_candidate_pool(absence, span_start, span_end)).select_related("user")
+    for teacher in pool:
+        day_blocks_cache: dict[int, list[tuple[time, time, str]]] = {}
+        teacher_subs = subs_by_teacher.get(teacher.pk, [])
+        teacher_pending = pending_by_teacher.get(teacher.pk, [])
+        cells, free_minutes = [], 0
+        for slot in slots:
+            if slot["reason"] is not None:
+                cells.append({"slot_index": slot["index"], "state": "off", "kind": "", "kind_label": ""})
+                continue
+            weekday = timezone.localtime(slot["start_datetime"]).weekday()
+            if weekday not in day_blocks_cache:
+                day_blocks_cache[weekday] = _kind_aware_blocks(teacher, weekday)
+            day_blocks = day_blocks_cache[weekday]
+            t0 = timezone.localtime(slot["start_datetime"]).time()
+            t1 = timezone.localtime(slot["end_datetime"]).time()
+            runs = _merge_blocks([(bs, be) for bs, be, _ in day_blocks])
+            is_free = any(r0 <= t0 and r1 >= t1 for r0, r1 in runs)
+
+            if _overlaps(teacher_subs, slot["start_datetime"], slot["end_datetime"]):
+                state, kind = "busy", ""
+            elif is_free:
+                overlapping_kinds = [k for bs, be, k in day_blocks if bs < t1 and be > t0]
+                kind = min(overlapping_kinds, key=lambda k: priority_by_kind[k])
+                state = (
+                    "pending"
+                    if _overlaps(teacher_pending, slot["start_datetime"], slot["end_datetime"])
+                    else "free"
+                )
+                free_minutes += 30
+            else:
+                state, kind = "unavailable", ""
+            cells.append(
+                {
+                    "slot_index": slot["index"],
+                    "state": state,
+                    "kind": kind,
+                    "kind_label": str(NonTeachingHoursKind(kind).label) if kind else "",
+                }
+            )
+
+        if not any(
+            cell["state"] in ("free", "pending") and cell["slot_index"] in needs_cover for cell in cells
+        ):
+            continue
+        columns.append(
             {
-                "start_datetime": gap_start,
-                "end_datetime": gap_end,
-                "whole": whole,
-                "parts": parts,
-                "coverable": whole_pickable or splittable,
+                "teacher": teacher,
+                "same_grade": teacher.grade_level == absence.teacher.grade_level,
+                "already_substituting": bool(teacher_subs),
+                "coverage_done_label": format_duration(teacher.coverage_done),
+                "free_minutes": free_minutes,
+                "cells": cells,
             }
         )
-    return plan
+
+    columns.sort(
+        key=lambda column: (
+            0 if column["same_grade"] else 1,
+            column["free_minutes"],
+            column["teacher"].coverage_done,
+            column["teacher"].user.last_name,
+            column["teacher"].user.first_name,
+        )
+    )
+    rows = [
+        {
+            "slot": slot,
+            "cells": [
+                {"teacher_id": column["teacher"].pk, **column["cells"][slot["index"]]}
+                for column in columns
+            ],
+        }
+        for slot in slots
+    ]
+    return {"slots": slots, "columns": columns, "rows": rows, "needs_cover": bool(needs_cover)}

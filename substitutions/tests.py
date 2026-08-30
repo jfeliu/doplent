@@ -9,7 +9,13 @@ from django.utils import timezone
 from teachers.models import NonTeachingHoursKind, NonTeachingHoursPriority, Teacher, WeeklyNonTeachingHours
 
 from .models import Absence, Substitution, SubstitutionOffer
-from .services import build_coverage_plan, discarded_periods, find_available_substitutes, uncovered_ranges
+from .services import (
+    build_coverage_grid,
+    can_offer,
+    discarded_periods,
+    find_available_substitutes,
+    uncovered_ranges,
+)
 
 
 def make_teacher(username, grade_level=Teacher.GradeLevel.PRIMARY, active=True, email=""):
@@ -426,232 +432,190 @@ class PickSubstituteViewTests(TestCase):
             },
         )
 
-        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.status_code, 302)
         self.assertFalse(Substitution.objects.filter(absence=self.absence).exists())
+        self.assertFalse(SubstitutionOffer.objects.filter(absence=self.absence).exists())
 
 
-class BuildCoveragePlanTests(TestCase):
+def _weekday_block(teacher, start, end, kind=NonTeachingHoursKind.FREE):
+    return WeeklyNonTeachingHours.objects.create(
+        teacher=teacher,
+        weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
+        start_time=start,
+        end_time=end,
+        kind=kind,
+    )
+
+
+class BuildCoverageGridTests(TestCase):
     def setUp(self):
-        self.absent = make_teacher("absent_split", grade_level=Teacher.GradeLevel.PRIMARY)
+        self.absent = make_teacher("grid_absent", grade_level=Teacher.GradeLevel.PRIMARY)
         # 2024-01-08 is a Monday, 9am-noon.
         self.absence = Absence.objects.create(
             teacher=self.absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 12)
         )
 
-    def test_single_teacher_covering_everything_yields_one_whole_gap_no_parts(self):
-        candidate = make_teacher("covers_all")
-        give_free_all_week(candidate)
+    def _col(self, grid, teacher):
+        return next((c for c in grid["columns"] if c["teacher"].pk == teacher.pk), None)
 
-        plan = build_coverage_plan(self.absence)
-        self.assertEqual(len(plan), 1)
-        self.assertEqual(plan[0]["start_datetime"], self.absence.start_datetime)
-        self.assertEqual(plan[0]["end_datetime"], self.absence.end_datetime)
-        self.assertIn(candidate, plan[0]["whole"])
-        self.assertEqual(plan[0]["parts"], [])
+    def _states(self, grid, teacher):
+        return [cell["state"] for cell in self._col(grid, teacher)["cells"]]
 
-    def test_no_one_covers_it_all_gives_parts_covering_the_full_range(self):
-        # first_half is free 9-10:30, second_half is free 10:30-12: neither
-        # alone covers the full 9-noon absence, but together they can.
-        first_half = make_teacher("first_half")
-        WeeklyNonTeachingHours.objects.create(
-            teacher=first_half,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(9, 0),
-            end_time=datetime.time(10, 30),
-        )
-        second_half = make_teacher("second_half")
-        WeeklyNonTeachingHours.objects.create(
-            teacher=second_half,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(10, 30),
-            end_time=datetime.time(12, 0),
-        )
+    def test_slots_span_the_absence_in_30_minute_steps_all_needing_cover(self):
+        grid = build_coverage_grid(self.absence)
 
-        plan = build_coverage_plan(self.absence)
-
-        self.assertEqual(len(plan), 1)
-        self.assertEqual(plan[0]["whole"], [])
-        parts = plan[0]["parts"]
-        self.assertEqual(len(parts), 2)
-        self.assertEqual(parts[0]["start_datetime"], self.absence.start_datetime)
-        self.assertEqual(parts[0]["end_datetime"], dt(2024, 1, 8, 10, 30))
-        self.assertIn(first_half, parts[0]["candidates"])
-        self.assertEqual(parts[1]["start_datetime"], dt(2024, 1, 8, 10, 30))
-        self.assertEqual(parts[1]["end_datetime"], self.absence.end_datetime)
-        self.assertIn(second_half, parts[1]["candidates"])
-        # The parts tile the gap with no holes or overlaps.
-        self.assertEqual(parts[0]["end_datetime"], parts[1]["start_datetime"])
-
-    def test_whole_and_parts_both_offered_when_both_are_possible(self):
-        covers_all = make_teacher("covers_all_too")
-        give_free_all_week(covers_all)
-        first_half_only = make_teacher("first_half_only")
-        WeeklyNonTeachingHours.objects.create(
-            teacher=first_half_only,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(9, 0),
-            end_time=datetime.time(10, 30),
-        )
-
-        plan = build_coverage_plan(self.absence)
-
-        self.assertEqual(len(plan), 1)
-        self.assertIn(covers_all, plan[0]["whole"])
-        parts = plan[0]["parts"]
-        self.assertEqual([(p["start_datetime"], p["end_datetime"]) for p in parts],
-                          [(self.absence.start_datetime, dt(2024, 1, 8, 10, 30)),
-                           (dt(2024, 1, 8, 10, 30), self.absence.end_datetime)])
-        self.assertIn(first_half_only, parts[0]["candidates"])
-        self.assertNotIn(first_half_only, parts[1]["candidates"])
-        self.assertIn(covers_all, parts[1]["candidates"])
-
-    def test_parts_are_ordered_longest_stretch_first(self):
-        # A covers 9-10 (1h), B covers 10-10:30 (30m), C covers 10:30-12 (1.5h).
-        for name, start, end in [
-            ("part_a", datetime.time(9, 0), datetime.time(10, 0)),
-            ("part_b", datetime.time(10, 0), datetime.time(10, 30)),
-            ("part_c", datetime.time(10, 30), datetime.time(12, 0)),
-        ]:
-            WeeklyNonTeachingHours.objects.create(
-                teacher=make_teacher(name),
-                weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-                start_time=start,
-                end_time=end,
-            )
-
-        parts = build_coverage_plan(self.absence)[0]["parts"]
-
-        durations = [p["end_datetime"] - p["start_datetime"] for p in parts]
-        self.assertEqual(durations, sorted(durations, reverse=True))
         self.assertEqual(
-            [(p["start_datetime"], p["end_datetime"]) for p in parts],
+            [(s["start_datetime"], s["end_datetime"]) for s in grid["slots"]],
             [
-                (dt(2024, 1, 8, 10, 30), dt(2024, 1, 8, 12)),
-                (dt(2024, 1, 8, 9), dt(2024, 1, 8, 10)),
+                (dt(2024, 1, 8, 9), dt(2024, 1, 8, 9, 30)),
+                (dt(2024, 1, 8, 9, 30), dt(2024, 1, 8, 10)),
                 (dt(2024, 1, 8, 10), dt(2024, 1, 8, 10, 30)),
+                (dt(2024, 1, 8, 10, 30), dt(2024, 1, 8, 11)),
+                (dt(2024, 1, 8, 11), dt(2024, 1, 8, 11, 30)),
+                (dt(2024, 1, 8, 11, 30), dt(2024, 1, 8, 12)),
             ],
         )
+        self.assertTrue(all(s["reason"] is None for s in grid["slots"]))
+        self.assertTrue(grid["needs_cover"])
 
-    def test_parts_are_the_fewest_chunks_not_split_at_every_change(self):
-        # long_a is free the whole first two hours; short_b overlaps only the
-        # middle. The split should be 9-11 / 11-12, not fragmented into
-        # 9-10 / 10-11 / 11-12 by short_b coming and going.
-        long_a = make_teacher("long_a")
-        WeeklyNonTeachingHours.objects.create(
-            teacher=long_a,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(9, 0),
-            end_time=datetime.time(11, 0),
+    def test_lunch_slots_flagged_as_outside_working_hours(self):
+        absence = Absence.objects.create(
+            teacher=make_teacher("grid_lunch"),
+            start_datetime=dt(2024, 1, 8, 12),
+            end_datetime=dt(2024, 1, 8, 16),
         )
-        short_b = make_teacher("short_b")
-        WeeklyNonTeachingHours.objects.create(
-            teacher=short_b,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(10, 0),
-            end_time=datetime.time(11, 0),
-        )
-        late_c = make_teacher("late_c")
-        WeeklyNonTeachingHours.objects.create(
-            teacher=late_c,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(11, 0),
-            end_time=datetime.time(12, 0),
-        )
+        reasons = {s["start_datetime"].strftime("%H:%M"): s["reason"] for s in build_coverage_grid(absence)["slots"]}
 
-        parts = build_coverage_plan(self.absence)[0]["parts"]
+        self.assertIsNone(reasons["12:00"])
+        self.assertEqual(reasons["13:00"], "outside_working_hours")
+        self.assertEqual(reasons["14:30"], "outside_working_hours")
+        self.assertIsNone(reasons["15:00"])
+
+    def test_requester_own_free_block_flags_those_slots(self):
+        _weekday_block(self.absent, datetime.time(10, 0), datetime.time(10, 30))
+
+        grid = build_coverage_grid(self.absence)
 
         self.assertEqual(
-            [(p["start_datetime"], p["end_datetime"]) for p in parts],
-            [(dt(2024, 1, 8, 9), dt(2024, 1, 8, 11)), (dt(2024, 1, 8, 11), dt(2024, 1, 8, 12))],
-        )
-        self.assertIn(long_a, parts[0]["candidates"])
-        self.assertNotIn(short_b, parts[0]["candidates"])  # doesn't cover all of 9-11
-
-    def test_gap_nobody_is_free_during_is_not_coverable(self):
-        # Free 9-10 and 11-12, with a 10-11 hole nobody covers at all.
-        only_edges = make_teacher("only_edges")
-        WeeklyNonTeachingHours.objects.create(
-            teacher=only_edges,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(9, 0),
-            end_time=datetime.time(10, 0),
-        )
-        WeeklyNonTeachingHours.objects.create(
-            teacher=only_edges,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(11, 0),
-            end_time=datetime.time(12, 0),
+            [s["reason"] for s in grid["slots"]],
+            [None, None, "requester_free", None, None, None],
         )
 
-        plan = build_coverage_plan(self.absence)
-
-        self.assertEqual(len(plan), 1)
-        self.assertFalse(plan[0]["coverable"])
-        self.assertEqual(plan[0]["whole"], [])
-        self.assertEqual(plan[0]["parts"], [])
-
-    def test_already_covered_absence_has_no_open_gaps(self):
-        candidate = make_teacher("already_covering")
-        give_free_all_week(candidate)
-        make_substitution(self.absence, candidate)
-
-        self.assertEqual(build_coverage_plan(self.absence), [])
-
-    def test_requester_own_free_block_splits_the_plan_around_it(self):
-        # self.absence is 9-noon Monday. The absent teacher has a personal
-        # free block 10:30-11, so only 9-10:30 and 11-noon actually need a
-        # substitute.
-        WeeklyNonTeachingHours.objects.create(
-            teacher=self.absent,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(10, 30),
-            end_time=datetime.time(11, 0),
-        )
-        candidate = make_teacher("covers_both_pieces")
-        WeeklyNonTeachingHours.objects.create(
-            teacher=candidate,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(9, 0),
-            end_time=datetime.time(10, 30),
-        )
-        WeeklyNonTeachingHours.objects.create(
-            teacher=candidate,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(11, 0),
-            end_time=datetime.time(12, 0),
+    def test_covered_slots_flagged(self):
+        _weekday_block(make_teacher("grid_cover_done"), datetime.time(9, 0), datetime.time(10, 0))
+        make_substitution(
+            self.absence, make_teacher("grid_covered_by"), start=dt(2024, 1, 8, 9), end=dt(2024, 1, 8, 10)
         )
 
-        plan = build_coverage_plan(self.absence)
-
-        self.assertEqual(len(plan), 2)
-        self.assertEqual(plan[0]["start_datetime"], self.absence.start_datetime)
-        self.assertEqual(plan[0]["end_datetime"], dt(2024, 1, 8, 10, 30))
-        self.assertEqual(plan[1]["start_datetime"], dt(2024, 1, 8, 11, 0))
-        self.assertEqual(plan[1]["end_datetime"], self.absence.end_datetime)
-        self.assertIn(candidate, plan[0]["whole"])
-        self.assertIn(candidate, plan[1]["whole"])
-        self.assertEqual(plan[0]["parts"], [])
-        self.assertEqual(plan[1]["parts"], [])
-
-    def test_partially_covered_absence_only_plans_the_remaining_gap(self):
-        first_half = make_teacher("first_half_confirmed")
-        give_free_all_week(first_half)
-        make_substitution(self.absence, first_half, start=self.absence.start_datetime, end=dt(2024, 1, 8, 10, 30))
-
-        second_half = make_teacher("second_half_candidate")
-        WeeklyNonTeachingHours.objects.create(
-            teacher=second_half,
-            weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
-            start_time=datetime.time(10, 30),
-            end_time=datetime.time(12, 0),
+        self.assertEqual(
+            [s["reason"] for s in build_coverage_grid(self.absence)["slots"]],
+            ["covered", "covered", None, None, None, None],
         )
 
-        plan = build_coverage_plan(self.absence)
+    def test_column_included_only_when_free_for_a_needed_slot(self):
+        helper = make_teacher("grid_helper")
+        _weekday_block(helper, datetime.time(9, 0), datetime.time(9, 30))
+        elsewhere = make_teacher("grid_elsewhere")
+        _weekday_block(elsewhere, datetime.time(15, 0), datetime.time(16, 0))
 
-        self.assertEqual(len(plan), 1)
-        self.assertEqual(plan[0]["start_datetime"], dt(2024, 1, 8, 10, 30))
-        self.assertEqual(plan[0]["end_datetime"], self.absence.end_datetime)
-        self.assertIn(second_half, plan[0]["whole"])
+        grid = build_coverage_grid(self.absence)
+
+        self.assertIsNotNone(self._col(grid, helper))
+        self.assertIsNone(self._col(grid, elsewhere))
+
+    def test_cell_states_free_and_busy_and_unavailable(self):
+        cand = make_teacher("grid_states")
+        _weekday_block(cand, datetime.time(9, 0), datetime.time(11, 0))
+        other = make_teacher("grid_states_other")
+        other_absence = Absence.objects.create(
+            teacher=other, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
+        )
+        make_substitution(other_absence, cand)
+
+        self.assertEqual(
+            self._states(build_coverage_grid(self.absence), cand),
+            ["free", "free", "busy", "busy", "unavailable", "unavailable"],
+        )
+
+    def test_pending_offer_marks_the_cells(self):
+        cand = make_teacher("grid_pending")
+        _weekday_block(cand, datetime.time(9, 0), datetime.time(12, 0))
+        make_offer(self.absence, cand, start=dt(2024, 1, 8, 9), end=dt(2024, 1, 8, 10))
+
+        self.assertEqual(
+            self._states(build_coverage_grid(self.absence), cand),
+            ["pending", "pending", "free", "free", "free", "free"],
+        )
+
+    def test_cell_kind_comes_from_the_covering_block(self):
+        cand = make_teacher("grid_kind")
+        _weekday_block(cand, datetime.time(9, 0), datetime.time(10, 0), kind=NonTeachingHoursKind.CO_TEACHING)
+
+        cells = build_coverage_grid(self.absence)["columns"]
+        col = next(c for c in cells if c["teacher"].pk == cand.pk)
+        self.assertEqual(col["cells"][0]["kind"], NonTeachingHoursKind.CO_TEACHING)
+
+    def test_columns_lead_with_the_narrowest_availability(self):
+        narrow = make_teacher("grid_narrow")
+        _weekday_block(narrow, datetime.time(9, 0), datetime.time(9, 30))
+        wide = make_teacher("grid_wide")
+        give_free_all_week(wide)
+
+        order = [c["teacher"].pk for c in build_coverage_grid(self.absence)["columns"]]
+        self.assertLess(order.index(narrow.pk), order.index(wide.pk))
+
+    def test_rows_align_cells_with_the_column_order(self):
+        a = make_teacher("grid_row_a")
+        _weekday_block(a, datetime.time(9, 0), datetime.time(9, 30))
+        b = make_teacher("grid_row_b")
+        give_free_all_week(b)
+
+        grid = build_coverage_grid(self.absence)
+        self.assertEqual(
+            [cell["teacher_id"] for cell in grid["rows"][0]["cells"]],
+            [col["teacher"].pk for col in grid["columns"]],
+        )
+
+
+class CanOfferTests(TestCase):
+    def setUp(self):
+        self.absent = make_teacher("co_absent", grade_level=Teacher.GradeLevel.PRIMARY)
+        self.absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 12)
+        )
+        self.cand = make_teacher("co_cand")
+        _weekday_block(self.cand, datetime.time(9, 0), datetime.time(10, 0))
+
+    def test_accepts_an_aligned_range_the_teacher_is_free_for(self):
+        self.assertTrue(can_offer(self.absence, self.cand, dt(2024, 1, 8, 9, 30), dt(2024, 1, 8, 10)))
+
+    def test_rejects_a_misaligned_range(self):
+        self.assertFalse(can_offer(self.absence, self.cand, dt(2024, 1, 8, 9, 15), dt(2024, 1, 8, 10)))
+
+    def test_rejects_a_range_the_teacher_is_not_free_for(self):
+        self.assertFalse(can_offer(self.absence, self.cand, dt(2024, 1, 8, 9, 30), dt(2024, 1, 8, 10, 30)))
+
+    def test_rejects_a_range_outside_working_hours(self):
+        _weekday_block(self.cand, datetime.time(13, 0), datetime.time(14, 0))
+        self.assertFalse(can_offer(self.absence, self.cand, dt(2024, 1, 8, 13), dt(2024, 1, 8, 13, 30)))
+
+    def test_rejects_an_already_covered_range(self):
+        make_substitution(
+            self.absence, make_teacher("co_covered_by"), start=dt(2024, 1, 8, 9), end=dt(2024, 1, 8, 10)
+        )
+        self.assertFalse(can_offer(self.absence, self.cand, dt(2024, 1, 8, 9, 30), dt(2024, 1, 8, 10)))
+
+    def test_rejects_when_the_teacher_is_committed_elsewhere(self):
+        other = make_teacher("co_other")
+        other_absence = Absence.objects.create(
+            teacher=other, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 10)
+        )
+        make_substitution(other_absence, self.cand)
+        self.assertFalse(can_offer(self.absence, self.cand, dt(2024, 1, 8, 9), dt(2024, 1, 8, 10)))
+
+    def test_rejects_the_absent_teacher_themselves(self):
+        _weekday_block(self.absent, datetime.time(9, 0), datetime.time(10, 0))
+        self.assertFalse(can_offer(self.absence, self.absent, dt(2024, 1, 8, 9), dt(2024, 1, 8, 10)))
 
 
 class WorkingHoursTests(TestCase):
@@ -677,7 +641,9 @@ class WorkingHoursTests(TestCase):
         )
 
         self.assertEqual(uncovered_ranges(absence), [])
-        self.assertEqual(build_coverage_plan(absence), [])
+        grid = build_coverage_grid(absence)
+        self.assertFalse(grid["needs_cover"])
+        self.assertEqual(grid["columns"], [])
 
     def test_absence_spanning_lunch_break_splits_around_it(self):
         # Noon to 3:30pm spans the 1-3pm non-working break.
@@ -812,7 +778,7 @@ class PickSubstituteViewDiscardedPeriodsTests(TestCase):
         self.assertContains(response, "Periods that don't need a substitute")
         self.assertContains(response, "Outside school hours")
         self.assertContains(response, "Requester's own non-working hours")
-        self.assertContains(response, "Covering")
+        self.assertContains(response, str(candidate))  # the grid still lists the available teacher
 
 
 class SplitPickSubstituteViewTests(TestCase):
@@ -878,26 +844,39 @@ class SplitPickSubstituteViewTests(TestCase):
         self.assertEqual(list(substitutions.values_list("substitute_teacher", flat=True)),
                           [self.first_half.pk, self.second_half.pk])
 
-    def test_whole_gap_teacher_and_a_partial_teacher_are_both_offered(self):
+    def test_grid_lists_every_teacher_free_for_any_part_of_the_absence(self):
         covers_all = make_teacher("view_covers_all")
         give_free_all_week(covers_all)
 
         response = self.client.get(reverse("pick_substitute", args=[self.absence.pk]))
 
-        self.assertContains(response, str(covers_all))     # whole-gap option
-        self.assertContains(response, str(self.first_half))  # partial option
-        # Picking the partial teacher for just their stretch makes an offer for
-        # that sub-range, not the whole gap.
+        self.assertContains(response, str(covers_all))
+        self.assertContains(response, str(self.first_half))
+        self.assertContains(response, str(self.second_half))
+
+    def test_teacher_can_be_offered_only_part_of_their_free_window(self):
+        # first_half is free 9:00-10:30; hand them just 10:00-10:30.
         self.client.post(
             reverse("pick_substitute", args=[self.absence.pk]),
             {
-                "slot_start": self.absence.start_datetime.isoformat(),
+                "slot_start": next_monday_dt(10).isoformat(),
                 "slot_end": next_monday_dt(10, 30).isoformat(),
                 "substitute_id": self.first_half.pk,
             },
         )
         offer = SubstitutionOffer.objects.get(absence=self.absence, substitute_teacher=self.first_half)
-        self.assertEqual(offer.end_datetime, next_monday_dt(10, 30))
+        self.assertEqual((offer.start_datetime, offer.end_datetime), (next_monday_dt(10), next_monday_dt(10, 30)))
+
+    def test_an_offer_the_teacher_is_not_free_for_is_rejected(self):
+        self.client.post(
+            reverse("pick_substitute", args=[self.absence.pk]),
+            {
+                "slot_start": self.absence.start_datetime.isoformat(),
+                "slot_end": next_monday_dt(9, 30).isoformat(),
+                "substitute_id": self.second_half.pk,  # not free before 10:30
+            },
+        )
+        self.assertFalse(SubstitutionOffer.objects.filter(substitute_teacher=self.second_half).exists())
 
 
 @override_settings(LANGUAGE_CODE="en")
@@ -973,27 +952,30 @@ class PickSubstituteOfferFlowTests(TestCase):
         self.assertEqual(SubstitutionOffer.objects.filter(absence=self.absence).count(), 2)
         self.assertFalse(Substitution.objects.filter(absence=self.absence).exists())
 
-    def test_page_shows_awaiting_response_for_a_pending_offer(self):
+    def test_grid_marks_a_pending_offer(self):
         candidate = make_teacher("offer_pending_display", email="candidate@example.edu")
         give_free_all_week(candidate)
         self._post(candidate)
 
         response = self.client.get(self.url)
 
-        self.assertContains(response, "Awaiting response")
-        self.assertContains(response, "Awaiting confirmation")
+        self.assertContains(response, "Offer pending")
+        self.assertContains(response, "cov-cell pending")
 
-    def test_offer_re_enabled_after_being_declined(self):
+    def test_a_declined_offer_does_not_block_re_offering(self):
         candidate = make_teacher("offer_declined_display", email="candidate@example.edu")
         give_free_all_week(candidate)
-        offer = make_offer(self.absence, candidate, status=SubstitutionOffer.Status.DECLINED)
+        make_offer(self.absence, candidate, status=SubstitutionOffer.Status.DECLINED)
 
         response = self.client.get(self.url)
+        self.assertContains(response, str(candidate))  # still listed in the grid
 
-        self.assertContains(response, "Previously declined")
-        # Declined doesn't block re-offering: the submit form is still there.
-        self.assertContains(response, f'value="{candidate.pk}"')
-        self.assertNotEqual(offer.status, SubstitutionOffer.Status.PENDING)
+        self._post(candidate)
+        self.assertTrue(
+            SubstitutionOffer.objects.filter(
+                absence=self.absence, substitute_teacher=candidate, status=SubstitutionOffer.Status.PENDING
+            ).exists()
+        )
 
 
 @override_settings(LANGUAGE_CODE="en")
