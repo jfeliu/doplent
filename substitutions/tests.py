@@ -1,8 +1,10 @@
 import datetime
+import os
 
+from django.conf import settings
 from django.contrib.auth.models import User
 from django.core import mail
-from django.test import TestCase, override_settings
+from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
@@ -1256,3 +1258,38 @@ class ReportAbsenceFormTests(TestCase):
         response = self._post("09:00", "11:00")
 
         self.assertRedirects(response, reverse("pick_substitute", args=[Absence.objects.get().pk]))
+
+
+class ProductionSettingsGuardTests(SimpleTestCase):
+    """With DEBUG off, config/settings.py must refuse to load on the checked-in
+    dev defaults - the check runs at import time, so it's exercised in a
+    subprocess."""
+
+    def _check(self, **env):
+        import subprocess
+        import sys
+
+        return subprocess.run(
+            [sys.executable, "manage.py", "check"],
+            cwd=settings.BASE_DIR,
+            capture_output=True,
+            text=True,
+            env={"PATH": os.environ["PATH"], "DJANGO_SETTINGS_MODULE": "config.settings", **env},
+        )
+
+    def test_debug_off_without_a_real_secret_key_refuses_to_start(self):
+        result = self._check(DJANGO_DEBUG="False")
+
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("DJANGO_SECRET_KEY", result.stderr)
+        self.assertIn("DJANGO_ALLOWED_HOSTS", result.stderr)
+
+    def test_debug_off_with_production_settings_configured_is_fine(self):
+        result = self._check(
+            DJANGO_DEBUG="False",
+            DJANGO_SECRET_KEY="x" * 50,
+            DJANGO_ALLOWED_HOSTS="doplent.example",
+            DJANGO_CSRF_TRUSTED_ORIGINS="https://doplent.example",
+        )
+
+        self.assertEqual(result.returncode, 0, result.stderr)
