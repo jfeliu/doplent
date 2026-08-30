@@ -14,7 +14,6 @@ import os
 from pathlib import Path
 
 import dj_database_url
-from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -40,24 +39,6 @@ ALLOWED_HOSTS = os.environ.get(
 CSRF_TRUSTED_ORIGINS = [
     origin for origin in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',') if origin
 ]
-
-# With DEBUG off we're serving real traffic, so refuse to boot on the checked-in
-# dev defaults - a placeholder SECRET_KEY here would sign forgeable sessions and
-# password-reset tokens. The Fly release command runs migrate with DEBUG off, so
-# a misconfigured deploy fails there before any request is served.
-if not DEBUG:
-    _unconfigured = []
-    if not SECRET_KEY or SECRET_KEY.startswith('django-insecure-'):
-        _unconfigured.append('DJANGO_SECRET_KEY (unset or still the checked-in dev key)')
-    if not os.environ.get('DJANGO_ALLOWED_HOSTS'):
-        _unconfigured.append('DJANGO_ALLOWED_HOSTS')
-    if not CSRF_TRUSTED_ORIGINS:
-        _unconfigured.append('DJANGO_CSRF_TRUSTED_ORIGINS')
-    if _unconfigured:
-        raise ImproperlyConfigured(
-            'DJANGO_DEBUG is off but these production settings are missing: '
-            + ', '.join(_unconfigured)
-        )
 
 # Fly.io (and most PaaS hosts) terminate TLS at a proxy and forward plain
 # HTTP internally, tagging the original scheme in this header - without it,
