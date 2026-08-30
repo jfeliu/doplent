@@ -544,9 +544,6 @@ msgstr ""
 msgid "Already covered"
 msgstr "Ja cobert"
 
-msgid "Offer pending"
-msgstr "Oferta pendent"
-
 msgid "Nothing selected"
 msgstr "Res seleccionat"
 
@@ -575,3 +572,9 @@ msgid "%(count)s offer sent."
 msgid_plural "%(count)s offers sent."
 msgstr[0] "S'ha enviat %(count)s oferta."
 msgstr[1] "S'han enviat %(count)s ofertes."
+
+msgid "Previously declined"
+msgstr "Rebutjada anteriorment"
+
+msgid "A decision is pending for this period"
+msgstr "Hi ha una decisió pendent per a aquest període"

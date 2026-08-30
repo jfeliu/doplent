@@ -50,9 +50,11 @@ substitute. Columns are ordered by:
 
 Cells are coloured by the kind of non-teaching block behind them (free,
 paperwork, co-teaching, escolta'm); a teacher already covering another absence
-during a slot shows that slot as busy, and a slot they already have a pending
-offer for is marked and not selectable. Selecting cells for several teachers
-and hitting **Send offers** fires one offer per contiguous run in a single go.
+during a slot shows that slot as busy. A period with a pending offer out is
+locked for *everyone* until the candidate responds (no parallel offers), and a
+period a teacher previously declined is flagged in red but still selectable.
+Selecting cells for several teachers and hitting **Send offers** fires one offer
+per contiguous run in a single go.
 
 ## Layout
 

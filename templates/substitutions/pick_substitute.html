@@ -63,6 +63,11 @@
   label.cov-cell[data-kind="paperwork"] { --k: #d97706; }
   label.cov-cell[data-kind="co_teaching"] { --k: #2563eb; }
   label.cov-cell[data-kind="escoltam"] { --k: #7c3aed; }
+  label.cov-cell.declined .cov-fill {
+    background: color-mix(in srgb, #dc2626 12%, var(--bs-body-bg));
+    border-left-color: #dc2626;
+  }
+  label.cov-cell.declined:not(.selected) .cov-fill::after { content: "\2717"; color: #dc2626; opacity: .75; }
   label.cov-cell.selected .cov-fill {
     background: var(--k); color: #fff; font-weight: 700;
     box-shadow: inset 0 0 0 2px rgba(255,255,255,.6);
@@ -110,12 +115,13 @@
       {% else %}
         {% for cell in row.cells %}
           {% if cell.state == 'free' %}
-          <label class="cov-cell free" data-kind="{{ cell.kind }}" data-teacher="{{ cell.teacher_id }}" data-slot="{{ row.slot.index }}" title="{{ cell.kind_label }}">
+          <label class="cov-cell free{% if cell.declined %} declined{% endif %}" data-kind="{{ cell.kind }}" data-teacher="{{ cell.teacher_id }}" data-slot="{{ row.slot.index }}"
+                 title="{{ cell.kind_label }}{% if cell.declined %} · {% translate 'Previously declined' %}{% endif %}">
             <input type="checkbox" name="cell" value="{{ cell.teacher_id }}:{{ row.slot.index }}">
             <span class="cov-fill"></span>
           </label>
           {% elif cell.state == 'pending' %}
-          <div class="cov-cell pending" data-kind="{{ cell.kind }}" title="{{ cell.kind_label }} · {% translate 'Offer pending' %}"><i class="bi bi-hourglass-split"></i></div>
+          <div class="cov-cell pending" data-kind="{{ cell.kind }}" title="{% translate 'A decision is pending for this period' %}"><i class="bi bi-hourglass-split"></i></div>
           {% else %}
           <div class="cov-cell {{ cell.state }}"></div>
           {% endif %}

@@ -631,9 +631,13 @@ class CanOfferTests(TestCase):
         _weekday_block(self.absent, datetime.time(9, 0), datetime.time(10, 0))
         self.assertFalse(can_offer(self.absence, self.absent, dt(2024, 1, 8, 9), dt(2024, 1, 8, 10)))
 
-    def test_rejects_a_range_overlapping_a_pending_offer_for_that_teacher(self):
-        make_offer(self.absence, self.cand, start=dt(2024, 1, 8, 9), end=dt(2024, 1, 8, 9, 30))
+    def test_rejects_a_range_overlapping_a_pending_offer_to_anyone(self):
+        someone_else = make_teacher("co_pending_holder")
+        make_offer(self.absence, someone_else, start=dt(2024, 1, 8, 9), end=dt(2024, 1, 8, 9, 30))
+        # self.cand is free 9-10 and has no offer of their own, but the 9:00-9:30
+        # slice is out for a decision, so any range touching it is locked.
         self.assertFalse(can_offer(self.absence, self.cand, dt(2024, 1, 8, 9), dt(2024, 1, 8, 10)))
+        self.assertTrue(can_offer(self.absence, self.cand, dt(2024, 1, 8, 9, 30), dt(2024, 1, 8, 10)))
 
 
 class WorkingHoursTests(TestCase):
@@ -898,37 +902,44 @@ class PickSubstituteOfferFlowTests(TestCase):
         )
         self.assertEqual(len(mail.outbox), 1)
 
-    def test_two_candidates_can_both_receive_a_parallel_offer_for_the_same_slot(self):
-        first = make_teacher("offer_parallel_1", email="first@example.edu")
+    def test_a_pending_offer_locks_the_period_against_a_second_teacher(self):
+        first = make_teacher("offer_lock_1", email="first@example.edu")
         give_free_all_week(first)
-        second = make_teacher("offer_parallel_2", email="second@example.edu")
+        second = make_teacher("offer_lock_2", email="second@example.edu")
         give_free_all_week(second)
 
-        self._post(first)
-        self._post(second)
+        self._post(first)   # first gets 9:00-11:00
+        self._post(second)  # blocked - a decision is pending for that period
 
-        self.assertEqual(SubstitutionOffer.objects.filter(absence=self.absence).count(), 2)
-        self.assertFalse(Substitution.objects.filter(absence=self.absence).exists())
+        self.assertEqual(SubstitutionOffer.objects.filter(absence=self.absence).count(), 1)
+        self.assertFalse(SubstitutionOffer.objects.filter(substitute_teacher=second).exists())
 
-    def test_grid_marks_a_pending_offer(self):
-        candidate = make_teacher("offer_pending_display", email="candidate@example.edu")
-        give_free_all_week(candidate)
-        self._post(candidate)
+    def test_grid_locks_the_slots_of_a_pending_offer_for_everyone(self):
+        offered = make_teacher("offer_pending_display", email="candidate@example.edu")
+        give_free_all_week(offered)
+        other = make_teacher("offer_pending_other")
+        give_free_all_week(other)
+        self._post(offered, 0, 1)  # 9:00-10:00
 
-        response = self.client.get(self.url)
+        grid = build_coverage_grid(self.absence)
+        for column in grid["columns"]:
+            states = [c["state"] for c in column["cells"]]
+            self.assertEqual(states[:2], ["pending", "pending"])  # locked for offered and other alike
+            self.assertEqual(states[2:], ["free", "free"])
 
-        self.assertContains(response, "Offer pending")
-        self.assertContains(response, "cov-cell pending")
-
-    def test_a_declined_offer_does_not_block_re_offering(self):
+    def test_a_declined_offer_is_marked_but_still_selectable(self):
         candidate = make_teacher("offer_declined_display", email="candidate@example.edu")
         give_free_all_week(candidate)
         make_offer(self.absence, candidate, status=SubstitutionOffer.Status.DECLINED)
 
-        response = self.client.get(self.url)
-        self.assertContains(response, str(candidate))  # still listed in the grid
+        grid = build_coverage_grid(self.absence)
+        column = next(c for c in grid["columns"] if c["teacher"].pk == candidate.pk)
+        self.assertTrue(all(c["state"] == "free" and c["declined"] for c in column["cells"]))
 
-        self._post(candidate)
+        response = self.client.get(self.url)
+        self.assertContains(response, "Previously declined")
+
+        self._post(candidate)  # re-offering still works
         self.assertTrue(
             SubstitutionOffer.objects.filter(
                 absence=self.absence, substitute_teacher=candidate, status=SubstitutionOffer.Status.PENDING

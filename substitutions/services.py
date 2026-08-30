@@ -349,9 +349,10 @@ def _kind_aware_blocks(teacher: Teacher, weekday: int) -> list[tuple[time, time,
 def can_offer(absence: Absence, teacher: Teacher, start_dt, end_dt) -> bool:
     """Whether `teacher` may be offered `[start_dt, end_dt)` for `absence`: a
     30-minute-aligned range that genuinely needs a substitute (working hours,
-    not the requester's own free time, not already covered), during which
-    `teacher` is a free, uncommitted, eligible candidate. The picker's grid
-    only offers such ranges; this re-checks a POSTed one."""
+    not the requester's own free time, not already covered, and with no pending
+    offer to anyone over it), during which `teacher` is a free, uncommitted,
+    eligible candidate. The picker's grid only offers such ranges; this
+    re-checks a POSTed one."""
     if not start_dt or not end_dt or start_dt >= end_dt:
         return False
     if not _is_slot_aligned(start_dt) or not _is_slot_aligned(end_dt):
@@ -377,9 +378,10 @@ def can_offer(absence: Absence, teacher: Teacher, start_dt, end_dt) -> bool:
         substitute_teacher=teacher, start_datetime__lt=end_dt, end_datetime__gt=start_dt
     ).exists():
         return False
+    # A period already out for a decision is locked for everyone until the
+    # candidate responds - no parallel offers.
     return not SubstitutionOffer.objects.filter(
         absence=absence,
-        substitute_teacher=teacher,
         status=SubstitutionOffer.Status.PENDING,
         start_datetime__lt=end_dt,
         end_datetime__gt=start_dt,
@@ -425,10 +427,12 @@ def build_coverage_grid(absence: Absence) -> dict:
       columns - [{teacher, same_grade, already_substituting, coverage_done_label,
                   free_minutes, cells}], narrowest availability first, then
                   least time covered, then name; each cell is
-                  {slot_index, state, kind, kind_label} with state "free",
-                  "pending" (this teacher has a pending offer over it, not
-                  selectable), "busy" (own confirmed substitution elsewhere),
-                  "unavailable" or "off" (the slot needs no sub)
+                  {slot_index, state, kind, kind_label, declined} where state is
+                  "free" (selectable; `declined` is True if this teacher turned
+                  a past offer for it down), "pending" (some offer over this
+                  slot is out for a decision - locked for everyone), "busy"
+                  (own confirmed substitution elsewhere), "unavailable" or
+                  "off" (the slot needs no sub)
       rows    - [{slot, reason, reason_label, cells}] - reason_label is set only
                 on the first row of each run of same-reason slots, for a
                 labelled band
@@ -444,22 +448,34 @@ def build_coverage_grid(absence: Absence) -> dict:
         start_datetime__lt=span_end, end_datetime__gt=span_start
     ).values_list("substitute_teacher_id", "start_datetime", "end_datetime"):
         subs_by_teacher.setdefault(teacher_id, []).append((sub_start, sub_end))
-    pending_by_teacher: dict[int, list[tuple[datetime, datetime]]] = {}
-    for teacher_id, offer_start, offer_end in SubstitutionOffer.objects.filter(
-        absence=absence, status=SubstitutionOffer.Status.PENDING
-    ).values_list("substitute_teacher_id", "start_datetime", "end_datetime"):
-        pending_by_teacher.setdefault(teacher_id, []).append((offer_start, offer_end))
+    offers = list(
+        SubstitutionOffer.objects.filter(
+            absence=absence,
+            status__in=(SubstitutionOffer.Status.PENDING, SubstitutionOffer.Status.DECLINED),
+        ).values_list("substitute_teacher_id", "status", "start_datetime", "end_datetime")
+    )
+    pending_intervals = [(s, e) for _, status, s, e in offers if status == SubstitutionOffer.Status.PENDING]
+    declined_by_teacher: dict[int, list[tuple[datetime, datetime]]] = {}
+    for teacher_id, status, offer_start, offer_end in offers:
+        if status == SubstitutionOffer.Status.DECLINED:
+            declined_by_teacher.setdefault(teacher_id, []).append((offer_start, offer_end))
+    # A period with any pending offer is locked for everyone until it resolves.
+    pending_slots = {
+        slot["index"]
+        for slot in slots
+        if slot["reason"] is None and _overlaps(pending_intervals, slot["start_datetime"], slot["end_datetime"])
+    }
 
     columns = []
     pool = _with_coverage_done(_candidate_pool(absence, span_start, span_end)).select_related("user")
     for teacher in pool:
         day_blocks_cache: dict[int, list[tuple[time, time, str]]] = {}
         teacher_subs = subs_by_teacher.get(teacher.pk, [])
-        teacher_pending = pending_by_teacher.get(teacher.pk, [])
+        teacher_declined = declined_by_teacher.get(teacher.pk, [])
         cells, free_minutes = [], 0
         for slot in slots:
             if slot["reason"] is not None:
-                cells.append({"slot_index": slot["index"], "state": "off", "kind": "", "kind_label": ""})
+                cells.append({"slot_index": slot["index"], "state": "off", "kind": "", "kind_label": "", "declined": False})
                 continue
             weekday = timezone.localtime(slot["start_datetime"]).weekday()
             if weekday not in day_blocks_cache:
@@ -470,25 +486,29 @@ def build_coverage_grid(absence: Absence) -> dict:
             runs = _merge_blocks([(bs, be) for bs, be, _ in day_blocks])
             is_free = any(r0 <= t0 and r1 >= t1 for r0, r1 in runs)
 
+            kind, declined = "", False
             if _overlaps(teacher_subs, slot["start_datetime"], slot["end_datetime"]):
-                state, kind = "busy", ""
+                state = "busy"
+            elif slot["index"] in pending_slots:
+                state = "pending"
+                if is_free:
+                    kinds = [k for bs, be, k in day_blocks if bs < t1 and be > t0]
+                    kind = min(kinds, key=lambda k: priority_by_kind[k])
             elif is_free:
-                overlapping_kinds = [k for bs, be, k in day_blocks if bs < t1 and be > t0]
-                kind = min(overlapping_kinds, key=lambda k: priority_by_kind[k])
-                state = (
-                    "pending"
-                    if _overlaps(teacher_pending, slot["start_datetime"], slot["end_datetime"])
-                    else "free"
-                )
+                kinds = [k for bs, be, k in day_blocks if bs < t1 and be > t0]
+                kind = min(kinds, key=lambda k: priority_by_kind[k])
+                state = "free"
+                declined = _overlaps(teacher_declined, slot["start_datetime"], slot["end_datetime"])
                 free_minutes += 30
             else:
-                state, kind = "unavailable", ""
+                state = "unavailable"
             cells.append(
                 {
                     "slot_index": slot["index"],
                     "state": state,
                     "kind": kind,
                     "kind_label": str(NonTeachingHoursKind(kind).label) if kind else "",
+                    "declined": declined,
                 }
             )
 
