@@ -94,7 +94,7 @@ class DeclineOfferForm(forms.Form):
     reason = forms.ChoiceField(
         label=_("Reason"),
         choices=SubstitutionOffer.DeclineReason.choices,
-        widget=forms.RadioSelect,
+        widget=forms.RadioSelect(attrs={"class": "form-check-input"}),
     )
     detail = forms.CharField(
         label=_("Details"),

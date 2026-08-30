@@ -21,7 +21,7 @@
 
 <div class="card border-danger-subtle">
   <div class="card-body">
-    <form method="post">
+    <form method="post" id="decline-form">
       {% csrf_token %}
       <input type="hidden" name="action" value="decline">
       <p class="fw-semibold mb-2">{% translate "Can't make it? Let them know why:" %}</p>
@@ -41,6 +41,20 @@
     </form>
   </div>
 </div>
+
+<script>
+  (function () {
+    var form = document.getElementById("decline-form");
+    if (!form) return;
+    var detail = document.getElementById("{{ decline_form.detail.id_for_label }}");
+    var other = form.querySelector('input[name="{{ decline_form.reason.html_name }}"][value="other"]');
+    if (detail && other) {
+      detail.addEventListener("input", function () {
+        if (detail.value.trim()) other.checked = true;
+      });
+    }
+  })();
+</script>
 {% else %}
 <div class="alert alert-info d-flex align-items-center gap-2">
   <i class="bi bi-info-circle"></i>

@@ -1081,6 +1081,19 @@ class RespondToOfferViewTests(TestCase):
         self.assertEqual(self.offer.status, SubstitutionOffer.Status.PENDING)
         self.assertEqual(mail.outbox, [])
 
+    def test_decline_reason_radios_render_as_bootstrap_form_checks(self):
+        self.client.force_login(self.candidate.user)
+
+        response = self.client.get(self.url)
+        html = response.content.decode()
+
+        # every reason radio must carry form-check-input so its label sits beside it
+        radios = [line for line in html.splitlines() if 'type="radio"' in line and 'name="reason"' in line]
+        self.assertEqual(len(radios), 4)
+        self.assertTrue(all("form-check-input" in radio for radio in radios))
+        # the script that ticks "Other" when the free-text detail is typed into
+        self.assertIn('value="other"]', html)
+
     def test_decline_with_other_needs_free_text_detail(self):
         self.client.force_login(self.candidate.user)
 
