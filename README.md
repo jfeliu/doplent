@@ -34,9 +34,9 @@ Not every minute of a reported absence needs covering. The school only runs
 09:00–13:00 and 15:00–17:00 (`WORKING_HOURS` in
 [substitutions/services.py](substitutions/services.py)), and any stretch that
 falls within the absent teacher's *own* non-teaching hours wasn't a class to
-begin with — so both are excluded before looking for a substitute. When an
-absence spans one of these excluded stretches, those rows are greyed out in the
-grid and listed separately (with why) below it.
+begin with — so both are excluded before looking for a substitute. Those rows
+show in the grid as a labelled band ("Outside school hours", "Your own
+non-teaching time", "Already covered") rather than selectable cells.
 
 Column ranking (see `build_coverage_grid` in
 [substitutions/services.py](substitutions/services.py)) — a teacher is a column
@@ -51,7 +51,8 @@ substitute. Columns are ordered by:
 Cells are coloured by the kind of non-teaching block behind them (free,
 paperwork, co-teaching, escolta'm); a teacher already covering another absence
 during a slot shows that slot as busy, and a slot they already have a pending
-offer for is marked.
+offer for is marked and not selectable. Selecting cells for several teachers
+and hitting **Send offers** fires one offer per contiguous run in a single go.
 
 ## Layout
 

@@ -203,14 +203,8 @@ msgstr "Cap encara."
 msgid "Pick a substitute"
 msgstr "Tria un substitut/a"
 
-msgid "Periods that don't need a substitute"
-msgstr "Períodes que no necessiten substitut/a"
-
 msgid "Outside school hours"
 msgstr "Fora de l'horari escolar"
-
-msgid "Requester's own non-working hours"
-msgstr "Hores sense docència pròpies de qui notifica l'absència"
 
 msgid "Free"
 msgstr "Lliure"
@@ -384,10 +378,6 @@ msgstr "oferta de substitució"
 msgid "substitution offers"
 msgstr "ofertes de substitució"
 
-#, python-format
-msgid "%(teacher)s chosen, awaiting confirmation."
-msgstr "Triat: %(teacher)s, pendent de confirmació."
-
 msgid "You're confirmed to cover this."
 msgstr "Confirmat: cobriràs aquesta substitució."
 
@@ -551,15 +541,6 @@ msgid "Could not read the file - save it as UTF-8 CSV and try again."
 msgstr ""
 "No s'ha pogut llegir el fitxer; desa'l com a CSV UTF-8 i torna-ho a provar."
 
-msgid ""
-"Click free 30-minute blocks in one teacher's column to build a period, then "
-"offer it to them. Give one teacher the whole time, or split it between "
-"several."
-msgstr ""
-"Clica els blocs de 30 minuts lliures a la columna d'un docent per formar un "
-"període i oferir-l'hi. Dona tot el temps a un sol docent o reparteix-lo "
-"entre diversos."
-
 msgid "Already covered"
 msgstr "Ja cobert"
 
@@ -569,13 +550,28 @@ msgstr "Oferta pendent"
 msgid "Nothing selected"
 msgstr "Res seleccionat"
 
-msgid "Offer this period"
-msgstr "Ofereix aquest període"
-
 msgid "No eligible substitute is free for any part of this absence."
 msgstr ""
 "Cap substitut/a disponible està lliure per a cap part d'aquesta absència."
 
-msgid "That period is no longer available - it may have just been covered."
+msgid ""
+"Click free 30-minute blocks to select who covers what. Select several "
+"periods for several teachers, then send all the offers at once."
 msgstr ""
-"Aquest període ja no està disponible; és possible que s'acabi de cobrir."
+"Clica els blocs de 30 minuts lliures per triar qui cobreix què. Selecciona "
+"diversos períodes per a diversos docents i envia totes les ofertes alhora."
+
+msgid "Send offers"
+msgstr "Envia les ofertes"
+
+msgid "Your own non-teaching time"
+msgstr "Les teves hores sense docència"
+
+msgid "Nothing offered - those periods may have just been taken."
+msgstr ""
+"No s'ha ofert res; és possible que aquests períodes ja s'hagin agafat."
+
+msgid "%(count)s offer sent."
+msgid_plural "%(count)s offers sent."
+msgstr[0] "S'ha enviat %(count)s oferta."
+msgstr[1] "S'han enviat %(count)s ofertes."

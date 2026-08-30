@@ -2,8 +2,8 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
-from django.utils.dateparse import parse_datetime
 from django.utils.translation import gettext as _
+from django.utils.translation import ngettext
 
 from teachers.models import Teacher
 
@@ -11,7 +11,7 @@ from . import emails
 from .forms import AbsenceForm
 from .models import Absence, Substitution, SubstitutionOffer
 from .offers import accept_offer, create_offer, decline_offer, expire_stale_offers
-from .services import build_coverage_grid, can_offer, discarded_periods, uncovered_ranges
+from .services import build_coverage_grid, can_offer, grid_slots, uncovered_ranges
 
 
 @login_required
@@ -74,27 +74,60 @@ def pick_substitute(request, absence_id):
         return redirect("dashboard")
 
     if request.method == "POST":
-        slot_start = parse_datetime(request.POST.get("slot_start", ""))
-        slot_end = parse_datetime(request.POST.get("slot_end", ""))
-        chosen = Teacher.objects.filter(pk=request.POST.get("substitute_id") or 0).first()
-        if chosen is not None and can_offer(absence, chosen, slot_start, slot_end):
-            offer, created = create_offer(absence, chosen, slot_start, slot_end)
-            if created:
-                emails.send_offer_notification(request, offer)
-                messages.info(request, _("%(teacher)s chosen, awaiting confirmation.") % {"teacher": chosen})
-        else:
-            messages.info(request, _("That period is no longer available - it may have just been covered."))
+        _send_offers(request, absence)
         return redirect("pick_substitute", absence_id=absence.pk)
 
     return render(
         request,
         "substitutions/pick_substitute.html",
-        {
-            "absence": absence,
-            "grid": build_coverage_grid(absence),
-            "discarded_periods": discarded_periods(absence),
-        },
+        {"absence": absence, "grid": build_coverage_grid(absence)},
     )
+
+
+def _send_offers(request, absence):
+    """Turn the grid's checked `cell` values ("<teacher_pk>:<slot_index>") into
+    one offer per contiguous run of slots per teacher, skipping any that don't
+    pass `can_offer`."""
+    slot_bounds = {slot["index"]: slot for slot in grid_slots(absence)}
+    by_teacher: dict[int, list[int]] = {}
+    for value in request.POST.getlist("cell"):  # each is "<teacher_pk>:<slot_index>"
+        teacher_part, sep, slot_part = value.partition(":")
+        if sep and teacher_part.isdigit() and slot_part.isdigit() and int(slot_part) in slot_bounds:
+            by_teacher.setdefault(int(teacher_part), []).append(int(slot_part))
+
+    sent = 0
+    for teacher_id, indexes in by_teacher.items():
+        teacher = Teacher.objects.filter(pk=teacher_id).first()
+        if teacher is None:
+            continue
+        for run_start, run_end in _contiguous_runs(sorted(set(indexes))):
+            start = slot_bounds[run_start]["start_datetime"]
+            end = slot_bounds[run_end]["end_datetime"]
+            if not can_offer(absence, teacher, start, end):
+                continue
+            offer, created = create_offer(absence, teacher, start, end)
+            if created:
+                emails.send_offer_notification(request, offer)
+                sent += 1
+
+    if sent:
+        messages.info(
+            request,
+            ngettext("%(count)s offer sent.", "%(count)s offers sent.", sent) % {"count": sent},
+        )
+    else:
+        messages.info(request, _("Nothing offered - those periods may have just been taken."))
+
+
+def _contiguous_runs(indexes):
+    """[0, 1, 3, 4, 5] -> [(0, 1), (3, 5)]."""
+    runs = []
+    for index in indexes:
+        if runs and index == runs[-1][1] + 1:
+            runs[-1] = (runs[-1][0], index)
+        else:
+            runs.append((index, index))
+    return runs
 
 
 @login_required

@@ -12,7 +12,6 @@
     min-width: max-content;
   }
   .cov-grid > div { border-right: 1px solid var(--bs-border-color); border-bottom: 1px solid var(--bs-border-color); }
-  .cov-grid > div:nth-child(1) { position: sticky; left: 0; z-index: 3; background: var(--bs-body-bg); }
   .cov-head {
     position: sticky; top: 0; z-index: 2;
     background: var(--bs-tertiary-bg, #f1f1f8);
@@ -27,9 +26,29 @@
     opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums;
   }
   .cov-cell { min-height: 1.9rem; }
-  .cov-cell.off, .cov-cell.unavailable { background: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,.03) 5px, rgba(0,0,0,.03) 6px); }
-  .cov-cell.busy { background: var(--bs-secondary-bg, #e2e3e5); color: var(--bs-secondary-color); text-align: center; }
+  .cov-cell.unavailable { background: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,.03) 5px, rgba(0,0,0,.03) 6px); }
+  .cov-cell.busy { background: var(--bs-secondary-bg, #e2e3e5); text-align: center; }
   .cov-cell.busy::after { content: "\00D7"; opacity: .5; }
+  .cov-cell.pending {
+    display: flex; align-items: center; justify-content: center;
+    background: color-mix(in srgb, var(--k, #16a34a) 14%, var(--bs-body-bg));
+    border-left: 3px solid color-mix(in srgb, var(--k, #16a34a) 45%, var(--bs-body-bg));
+    opacity: .8;
+  }
+  .cov-cell.pending[data-kind="paperwork"] { --k: #d97706; }
+  .cov-cell.pending[data-kind="co_teaching"] { --k: #2563eb; }
+  .cov-cell.pending[data-kind="escoltam"] { --k: #7c3aed; }
+
+  .cov-band {
+    grid-column: 2 / -1;
+    background: repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(0,0,0,.045) 6px, rgba(0,0,0,.045) 7px);
+    display: flex; align-items: center;
+    font-size: .72rem; opacity: .65; white-space: nowrap;
+  }
+  .cov-band span {
+    position: sticky; left: 3.5rem; z-index: 1;
+    padding: .15rem .5rem; background: var(--bs-body-bg); border-radius: .3rem;
+  }
   .cov-row-off .cov-time { text-decoration: line-through; }
 
   label.cov-cell { display: block; cursor: pointer; margin: 0; }
@@ -44,13 +63,11 @@
   label.cov-cell[data-kind="paperwork"] { --k: #d97706; }
   label.cov-cell[data-kind="co_teaching"] { --k: #2563eb; }
   label.cov-cell[data-kind="escoltam"] { --k: #7c3aed; }
-  label.cov-cell.pending .cov-fill { opacity: .6; }
   label.cov-cell.selected .cov-fill {
     background: var(--k); color: #fff; font-weight: 700;
     box-shadow: inset 0 0 0 2px rgba(255,255,255,.6);
   }
   label.cov-cell.selected .cov-fill::after { content: "\2713"; }
-  label.cov-cell.selected .cov-fill i { display: none; }
 
   .cov-legend { display: flex; flex-wrap: wrap; gap: .25rem 1rem; font-size: .75rem; opacity: .8; margin-top: .5rem; }
   .cov-legend span::before { content: ""; display: inline-block; width: .8em; height: .8em; border-radius: 2px; vertical-align: -.1em; margin-right: .35em; background: var(--k); }
@@ -68,14 +85,11 @@
 <h1 class="h4 mb-1"><i class="bi bi-person-check text-primary me-1"></i>{% translate "Pick a substitute" %}</h1>
 <p class="text-muted mb-3"><i class="bi bi-clock-history me-1"></i>{{ absence.start_datetime|ca_timeframe:absence.end_datetime }}</p>
 
-<p class="text-muted small">{% translate "Click free 30-minute blocks in one teacher's column to build a period, then offer it to them. Give one teacher the whole time, or split it between several." %}</p>
+<p class="text-muted small">{% translate "Click free 30-minute blocks to select who covers what. Select several periods for several teachers, then send all the offers at once." %}</p>
 
 {% if grid.columns %}
 <form method="post" id="cov-form">
   {% csrf_token %}
-  <input type="hidden" name="substitute_id" id="cov-teacher">
-  <input type="hidden" name="slot_start" id="cov-start">
-  <input type="hidden" name="slot_end" id="cov-end">
 
   <div class="cov-scroll">
     <div class="cov-grid" style="--cols: {{ grid.columns|length }}">
@@ -90,24 +104,23 @@
       {% endfor %}
 
       {% for row in grid.rows %}
-      <div class="cov-time {% if row.slot.reason %}cov-row-off{% endif %}"
-           {% if row.slot.reason == 'outside_working_hours' %}title="{% translate 'Outside school hours' %}"
-           {% elif row.slot.reason == 'requester_free' %}title="{% translate "Requester's own non-working hours" %}"
-           {% elif row.slot.reason == 'covered' %}title="{% translate 'Already covered' %}"{% endif %}>
-        {{ row.slot.start_datetime|time:"H:i" }}
-      </div>
-      {% for cell in row.cells %}
-        {% if cell.state == 'free' or cell.state == 'pending' %}
-        <label class="cov-cell {{ cell.state }}" data-kind="{{ cell.kind }}"
-               data-teacher="{{ cell.teacher_id }}" data-slot="{{ row.slot.index }}"
-               title="{{ cell.kind_label }}{% if cell.state == 'pending' %} · {% translate 'Offer pending' %}{% endif %}">
-          <input type="checkbox">
-          <span class="cov-fill">{% if cell.state == 'pending' %}<i class="bi bi-hourglass-split"></i>{% endif %}</span>
-        </label>
-        {% else %}
-        <div class="cov-cell {{ cell.state }}"></div>
-        {% endif %}
-      {% endfor %}
+      <div class="cov-time{% if row.reason %} cov-row-off{% endif %}">{{ row.slot.start_datetime|time:"H:i" }}</div>
+      {% if row.reason %}
+      <div class="cov-band"><span>{{ row.reason_label }}</span></div>
+      {% else %}
+        {% for cell in row.cells %}
+          {% if cell.state == 'free' %}
+          <label class="cov-cell free" data-kind="{{ cell.kind }}" data-teacher="{{ cell.teacher_id }}" data-slot="{{ row.slot.index }}" title="{{ cell.kind_label }}">
+            <input type="checkbox" name="cell" value="{{ cell.teacher_id }}:{{ row.slot.index }}">
+            <span class="cov-fill"></span>
+          </label>
+          {% elif cell.state == 'pending' %}
+          <div class="cov-cell pending" data-kind="{{ cell.kind }}" title="{{ cell.kind_label }} · {% translate 'Offer pending' %}"><i class="bi bi-hourglass-split"></i></div>
+          {% else %}
+          <div class="cov-cell {{ cell.state }}"></div>
+          {% endif %}
+        {% endfor %}
+      {% endif %}
       {% endfor %}
     </div>
   </div>
@@ -121,13 +134,13 @@
 
   <div class="cov-bar">
     <span id="cov-summary" class="text-muted">{% translate "Nothing selected" %}</span>
-    <button type="submit" id="cov-submit" class="btn btn-primary btn-sm ms-auto" disabled>{% translate "Offer this period" %}</button>
+    <button type="submit" id="cov-submit" class="btn btn-primary btn-sm ms-auto" disabled>{% translate "Send offers" %}</button>
   </div>
 </form>
 
 {% localize off %}
 <script id="cov-slots" type="application/json">[
-  {% for slot in grid.slots %}{"start": "{{ slot.start_datetime.isoformat }}", "end": "{{ slot.end_datetime.isoformat }}", "label": "{{ slot.start_datetime|time:'H:i' }}", "endLabel": "{{ slot.end_datetime|time:'H:i' }}"}{% if not forloop.last %},{% endif %}{% endfor %}
+  {% for slot in grid.slots %}{"label": "{{ slot.start_datetime|time:'H:i' }}", "endLabel": "{{ slot.end_datetime|time:'H:i' }}"}{% if not forloop.last %},{% endif %}{% endfor %}
 ]</script>
 {% endlocalize %}
 <script id="cov-teachers" type="application/json">{
@@ -141,56 +154,51 @@
   var cells = Array.prototype.slice.call(document.querySelectorAll("label.cov-cell"));
   var summary = document.getElementById("cov-summary");
   var submit = document.getElementById("cov-submit");
-  var offerLabel = submit.textContent;
-  var sel = { teacher: null, lo: null, hi: null };
+  summary.dataset.empty = summary.textContent;
+  var sendTpl = submit.dataset.tpl = submit.textContent;
+
+  function runs() {
+    // {teacherPk: [slotIdx, ...]} -> [[pk, lo, hi], ...]
+    var byTeacher = {};
+    cells.forEach(function (c) {
+      if (c.querySelector("input").checked) {
+        (byTeacher[c.dataset.teacher] = byTeacher[c.dataset.teacher] || []).push(parseInt(c.dataset.slot, 10));
+      }
+    });
+    var out = [];
+    Object.keys(byTeacher).forEach(function (pk) {
+      byTeacher[pk].sort(function (a, b) { return a - b; }).forEach(function (i) {
+        var last = out[out.length - 1];
+        if (last && last[0] === pk && i === last[2] + 1) last[2] = i;
+        else out.push([pk, i, i]);
+      });
+    });
+    return out;
+  }
 
   function render() {
-    var valid = sel.teacher !== null;
-    cells.forEach(function (c) {
-      var mine = c.dataset.teacher === sel.teacher;
-      var i = parseInt(c.dataset.slot, 10);
-      var on = valid && mine && i >= sel.lo && i <= sel.hi;
-      c.classList.toggle("selected", on);
-      c.querySelector("input").checked = on;
-    });
-    if (valid) {
-      var name = TEACHERS[sel.teacher];
-      summary.textContent = name + " · " + SLOTS[sel.lo].label + " – " + SLOTS[sel.hi].endLabel;
+    cells.forEach(function (c) { c.classList.toggle("selected", c.querySelector("input").checked); });
+    var r = runs();
+    if (r.length) {
+      summary.textContent = r.map(function (x) {
+        return TEACHERS[x[0]] + " " + SLOTS[x[1]].label + "–" + SLOTS[x[2]].endLabel;
+      }).join("  ·  ");
       summary.classList.remove("text-muted");
-      document.getElementById("cov-teacher").value = sel.teacher;
-      document.getElementById("cov-start").value = SLOTS[sel.lo].start;
-      document.getElementById("cov-end").value = SLOTS[sel.hi].end;
       submit.disabled = false;
-      submit.textContent = offerLabel + " → " + name;
+      submit.textContent = sendTpl + " (" + r.length + ")";
     } else {
       summary.textContent = summary.dataset.empty;
       summary.classList.add("text-muted");
       submit.disabled = true;
-      submit.textContent = offerLabel;
+      submit.textContent = sendTpl;
     }
   }
-  summary.dataset.empty = summary.textContent;
 
   cells.forEach(function (c) {
     c.addEventListener("click", function (e) {
       e.preventDefault();
-      var t = c.dataset.teacher;
-      var i = parseInt(c.dataset.slot, 10);
-      if (sel.teacher !== t) {
-        sel = { teacher: t, lo: i, hi: i };
-      } else if (i === sel.lo - 1) {
-        sel.lo = i;
-      } else if (i === sel.hi + 1) {
-        sel.hi = i;
-      } else if (i === sel.lo && sel.lo === sel.hi) {
-        sel = { teacher: null, lo: null, hi: null };
-      } else if (i === sel.lo) {
-        sel.lo = i + 1;
-      } else if (i === sel.hi) {
-        sel.hi = i - 1;
-      } else {
-        sel = { teacher: t, lo: i, hi: i };
-      }
+      var input = c.querySelector("input");
+      input.checked = !input.checked;
       render();
     });
   });
@@ -202,24 +210,6 @@
 <div class="alert alert-warning d-flex align-items-center gap-2">
   <i class="bi bi-exclamation-triangle"></i>
   {% translate "No eligible substitute is free for any part of this absence." %}
-</div>
-{% endif %}
-
-{% if discarded_periods %}
-<div class="card mt-4">
-  <div class="card-header"><i class="bi bi-eye-slash text-muted"></i>{% translate "Periods that don't need a substitute" %}</div>
-  <ul class="list-group list-group-flush">
-    {% for period in discarded_periods %}
-    <li class="list-group-item d-flex flex-wrap justify-content-between align-items-center gap-2 py-2">
-      <span><i class="bi bi-clock-history text-muted me-1"></i>{{ period.start_datetime|ca_timeframe:period.end_datetime }}</span>
-      {% if period.reason == "outside_working_hours" %}
-      <span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-moon-fill"></i> {% translate "Outside school hours" %}</span>
-      {% else %}
-      <span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-cup-hot-fill"></i> {% translate "Requester's own non-working hours" %}</span>
-      {% endif %}
-    </li>
-    {% endfor %}
-  </ul>
 </div>
 {% endif %}
 {% endblock %}

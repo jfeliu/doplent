@@ -3,12 +3,20 @@ from datetime import date, datetime, time, timedelta
 from django.db.models import DurationField, ExpressionWrapper, F, Sum
 from django.db.models.functions import Coalesce
 from django.utils import timezone
+from django.utils.translation import gettext_lazy as _
 
 from teachers.models import NonTeachingHoursKind, NonTeachingHoursPriority, Teacher
 
 from .models import Absence, Substitution, SubstitutionOffer
 
 SLOT = timedelta(minutes=30)
+
+# Why a grid slot needs no substitute - shown as a labelled band in the picker.
+SLOT_REASON_LABELS = {
+    "covered": _("Already covered"),
+    "outside_working_hours": _("Outside school hours"),
+    "requester_free": _("Your own non-teaching time"),
+}
 
 # The school's daily working hours - substitutes are never searched for
 # outside these windows, regardless of any teacher's individual schedule.
@@ -287,40 +295,6 @@ def uncovered_ranges(absence: Absence) -> list[tuple[datetime, datetime]]:
     return gaps
 
 
-def discarded_periods(absence: Absence) -> list[dict]:
-    """Return the parts of `absence`'s reported range that need no substitute,
-    each as a dict with `start_datetime`, `end_datetime` and `reason` - either
-    "outside_working_hours" or "requester_free" - in chronological order.
-    When both apply to a stretch of time, "outside_working_hours" wins since
-    it's the more fundamental reason. Adjacent stretches with the same reason
-    are merged into one period."""
-    non_working = _outside_working_hours(absence.start_datetime, absence.end_datetime)
-    requester_free = _merged_intervals_for_range(absence.teacher, absence.start_datetime, absence.end_datetime)
-
-    boundaries = {absence.start_datetime, absence.end_datetime}
-    for start, end in non_working + requester_free:
-        if absence.start_datetime < start < absence.end_datetime:
-            boundaries.add(start)
-        if absence.start_datetime < end < absence.end_datetime:
-            boundaries.add(end)
-    boundaries = sorted(boundaries)
-
-    periods = []
-    for seg_start, seg_end in zip(boundaries, boundaries[1:]):
-        if any(start <= seg_start < end for start, end in non_working):
-            reason = "outside_working_hours"
-        elif any(start <= seg_start < end for start, end in requester_free):
-            reason = "requester_free"
-        else:
-            reason = None
-
-        if reason and periods and periods[-1]["reason"] == reason and periods[-1]["end_datetime"] == seg_start:
-            periods[-1]["end_datetime"] = seg_end
-        elif reason:
-            periods.append({"start_datetime": seg_start, "end_datetime": seg_end, "reason": reason})
-    return periods
-
-
 def _merged_intervals_for_range(candidate: Teacher, start_dt, end_dt) -> list[tuple[datetime, datetime]]:
     """Return the candidate's free time within [start_dt, end_dt) as a list of
     aware (start, end) datetime intervals, built from their weekly
@@ -399,42 +373,33 @@ def can_offer(absence: Absence, teacher: Teacher, start_dt, end_dt) -> bool:
     free = _merged_intervals_for_range(teacher, start_dt, end_dt)
     if not any(run_start <= start_dt and run_end >= end_dt for run_start, run_end in free):
         return False
-    return not Substitution.objects.filter(
+    if Substitution.objects.filter(
         substitute_teacher=teacher, start_datetime__lt=end_dt, end_datetime__gt=start_dt
+    ).exists():
+        return False
+    return not SubstitutionOffer.objects.filter(
+        absence=absence,
+        substitute_teacher=teacher,
+        status=SubstitutionOffer.Status.PENDING,
+        start_datetime__lt=end_dt,
+        end_datetime__gt=start_dt,
     ).exists()
 
 
-def build_coverage_grid(absence: Absence) -> dict:
-    """Data for the substitute-picking grid: 30-minute rows across the whole
-    absence, one column per teacher who is free for at least one slot that
-    still needs a substitute.
-
-      slots   - [{index, start_datetime, end_datetime, reason}] where reason is
-                None (needs a sub), "covered", "outside_working_hours" or
-                "requester_free"
-      columns - [{teacher, same_grade, already_substituting, coverage_done_label,
-                  free_minutes, cells}], narrowest availability first, then
-                  least time covered, then name; each cell is
-                  {slot_index, state, kind, kind_label} with state "free",
-                  "pending" (this teacher has a pending offer over it), "busy"
-                  (own confirmed substitution elsewhere), "unavailable" or "off"
-                  (the slot needs no sub)
-      needs_cover - whether any slot still needs a substitute
-    """
+def grid_slots(absence: Absence) -> list[dict]:
+    """The 30-minute slots the picking grid is built from, one per row across the
+    whole absence span. Each is `{index, start_datetime, end_datetime, reason}`;
+    reason is None when the slot needs a substitute, else "covered",
+    "outside_working_hours" or "requester_free"."""
     span_start, span_end = _slot_span(absence)
-    slot_times: list[tuple[int, datetime, datetime]] = []
-    cursor, index = span_start, 0
-    while cursor < span_end:
-        slot_times.append((index, cursor, cursor + SLOT))
-        cursor += SLOT
-        index += 1
-
     non_working = _outside_working_hours(span_start, span_end)
     requester_free = _merged_intervals_for_range(absence.teacher, span_start, span_end)
     covered = [(sub.start_datetime, sub.end_datetime) for sub in absence.substitutions.all()]
 
     slots = []
-    for slot_index, slot_start, slot_end in slot_times:
+    cursor, index = span_start, 0
+    while cursor < span_end:
+        slot_start, slot_end = cursor, cursor + SLOT
         if _overlaps(covered, slot_start, slot_end):
             reason = "covered"
         elif _overlaps(non_working, slot_start, slot_end):
@@ -444,8 +409,33 @@ def build_coverage_grid(absence: Absence) -> dict:
         else:
             reason = None
         slots.append(
-            {"index": slot_index, "start_datetime": slot_start, "end_datetime": slot_end, "reason": reason}
+            {"index": index, "start_datetime": slot_start, "end_datetime": slot_end, "reason": reason}
         )
+        cursor += SLOT
+        index += 1
+    return slots
+
+
+def build_coverage_grid(absence: Absence) -> dict:
+    """Data for the substitute-picking grid: 30-minute rows across the whole
+    absence, one column per teacher who is free for at least one slot that
+    still needs a substitute.
+
+      slots   - as `grid_slots`
+      columns - [{teacher, same_grade, already_substituting, coverage_done_label,
+                  free_minutes, cells}], narrowest availability first, then
+                  least time covered, then name; each cell is
+                  {slot_index, state, kind, kind_label} with state "free",
+                  "pending" (this teacher has a pending offer over it, not
+                  selectable), "busy" (own confirmed substitution elsewhere),
+                  "unavailable" or "off" (the slot needs no sub)
+      rows    - [{slot, reason, reason_label, cells}] - reason_label is set only
+                on the first row of each run of same-reason slots, for a
+                labelled band
+      needs_cover - whether any slot still needs a substitute
+    """
+    span_start, span_end = _slot_span(absence)
+    slots = grid_slots(absence)
     needs_cover = {slot["index"] for slot in slots if slot["reason"] is None}
 
     priority_by_kind = NonTeachingHoursPriority.ordering_map()
@@ -526,14 +516,19 @@ def build_coverage_grid(absence: Absence) -> dict:
             column["teacher"].user.first_name,
         )
     )
-    rows = [
-        {
-            "slot": slot,
-            "cells": [
-                {"teacher_id": column["teacher"].pk, **column["cells"][slot["index"]]}
-                for column in columns
-            ],
-        }
-        for slot in slots
-    ]
+    rows, previous_reason = [], None
+    for slot in slots:
+        reason = slot["reason"]
+        rows.append(
+            {
+                "slot": slot,
+                "reason": reason,
+                "reason_label": SLOT_REASON_LABELS[reason] if reason and reason != previous_reason else "",
+                "cells": [
+                    {"teacher_id": column["teacher"].pk, **column["cells"][slot["index"]]}
+                    for column in columns
+                ],
+            }
+        )
+        previous_reason = reason
     return {"slots": slots, "columns": columns, "rows": rows, "needs_cover": bool(needs_cover)}
