@@ -225,10 +225,8 @@ msgid "Already covering another absence"
 msgstr "Ja cobreix una altra absència"
 
 #, python-format
-msgid "%(counter)s substitution done"
-msgid_plural "%(counter)s substitutions done"
-msgstr[0] "%(counter)s substitució feta"
-msgstr[1] "%(counter)s substitucions fetes"
+msgid "%(time)s covered so far"
+msgstr "%(time)s coberts fins ara"
 
 msgid "Choose"
 msgstr "Tria"

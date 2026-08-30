@@ -206,6 +206,37 @@ class FindAvailableSubstitutesTests(TestCase):
         self.assertIn(busy, results)
         self.assertLess(results.index(idle), results.index(busy))
 
+    def test_ranking_by_time_covered_not_substitution_count(self):
+        # many_short has done three 30-minute substitutions (1h30m total);
+        # few_long has done one 3-hour substitution. Ranking is by time
+        # covered, so many_short - with fewer total hours - comes first even
+        # though they have more substitutions to their name.
+        many_short = make_teacher("many_short")
+        give_free_all_week(many_short)
+        few_long = make_teacher("few_long")
+        give_free_all_week(few_long)
+
+        past_absent = make_teacher("past_absent_time")
+        give_free_all_week(past_absent)
+        for i in range(3):
+            short_absence = Absence.objects.create(
+                teacher=past_absent,
+                start_datetime=dt(2024, 1, 1 + i, 9),
+                end_datetime=dt(2024, 1, 1 + i, 9, 30),
+            )
+            make_substitution(short_absence, many_short)
+        long_absence = Absence.objects.create(
+            teacher=past_absent,
+            start_datetime=dt(2024, 1, 5, 9),
+            end_datetime=dt(2024, 1, 5, 12),
+        )
+        make_substitution(long_absence, few_long)
+
+        results = find_available_substitutes(self.absence)
+        self.assertLess(results.index(many_short), results.index(few_long))
+        self.assertEqual(result_for(results, many_short).coverage_done, datetime.timedelta(hours=1, minutes=30))
+        self.assertEqual(result_for(results, many_short).coverage_done_label, "1h 30m")
+
     def test_absent_teacher_and_inactive_excluded(self):
         inactive = make_teacher("inactive", active=False)
         give_free_all_week(inactive)
@@ -1199,6 +1230,7 @@ class ReportAbsenceFormTests(TestCase):
             "classes per cobrir", " ".join(response.context["form"].non_field_errors())
         )
         self.assertFalse(Absence.objects.exists())
+
 
     def test_period_on_a_weekend_is_rejected(self):
         # 2024-01-13 is a Saturday.

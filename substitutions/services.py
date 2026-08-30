@@ -1,6 +1,7 @@
 from datetime import date, datetime, time, timedelta
 
-from django.db.models import Count
+from django.db.models import DurationField, ExpressionWrapper, F, Sum
+from django.db.models.functions import Coalesce
 from django.utils import timezone
 
 from teachers.models import NonTeachingHoursKind, NonTeachingHoursPriority, Teacher
@@ -17,6 +18,17 @@ WORKING_HOURS: list[tuple[time, time]] = [
 # Weekdays the school runs (Monday=0 ... Sunday=6). Nothing needs covering on
 # any other day.
 SCHOOL_WEEKDAYS: frozenset[int] = frozenset({0, 1, 2, 3, 4})
+
+
+def format_duration(td: timedelta) -> str:
+    """Render a timedelta as a compact "1h 30m" / "45m" / "2h" string."""
+    total_minutes = max(0, int(td.total_seconds() // 60))
+    hours, minutes = divmod(total_minutes, 60)
+    if hours and minutes:
+        return f"{hours}h {minutes}m"
+    if hours:
+        return f"{hours}h"
+    return f"{minutes}m"
 
 
 def _daily_segments(start_dt, end_dt) -> list[tuple[date, time, time]]:
@@ -168,8 +180,10 @@ def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) ->
     Each returned Teacher carries `disruption_priority` (the priority of the
     least-available kind of non-teaching time they'd have to be pulled off, per
     NonTeachingHoursPriority), `is_fully_free` (that kind is the top-priority
-    one) and `coverage_kind_label` (its translated label), alongside
-    `same_grade` and `already_substituting`."""
+    one), `coverage_kind_label` (its translated label), `coverage_done` (total
+    time they've already covered, as a timedelta) and `coverage_done_label`
+    (that duration rendered "1h 30m"), alongside `same_grade` and
+    `already_substituting`."""
     segments = _coverage_segments(absence, start_dt, end_dt)
 
     busy_substituting = set(
@@ -180,8 +194,19 @@ def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) ->
 
     candidates = (
         _candidate_pool(absence, start_dt, end_dt)
-        .annotate(substitutions_count=Count("substitutions_done"))
-        .order_by("substitutions_count", "user__last_name", "user__first_name")
+        .annotate(
+            coverage_done=Coalesce(
+                Sum(
+                    ExpressionWrapper(
+                        F("substitutions_done__end_datetime") - F("substitutions_done__start_datetime"),
+                        output_field=DurationField(),
+                    )
+                ),
+                timedelta(),
+                output_field=DurationField(),
+            )
+        )
+        .order_by("coverage_done", "user__last_name", "user__first_name")
     )
 
     priority_by_kind = NonTeachingHoursPriority.ordering_map()
@@ -201,11 +226,12 @@ def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) ->
         candidate.disruption_priority = disruption
         candidate.is_fully_free = disruption == best_priority
         candidate.coverage_kind_label = label_by_priority[disruption]
+        candidate.coverage_done_label = format_duration(candidate.coverage_done)
         candidate.same_grade = candidate.grade_level == absence.teacher.grade_level
         candidate.already_substituting = candidate.pk in busy_substituting
         eligible.append(candidate)
 
-    # Stable sort: candidates keep their existing substitutions_count/name order
+    # Stable sort: candidates keep their existing coverage-time/name order
     # within each tier, since the loop above preserved the queryset's ordering
     # and Python's sort is stable.
     eligible.sort(
@@ -225,15 +251,17 @@ def find_available_substitutes(absence: Absence) -> list[Teacher]:
     substitute elsewhere during the window (shown for visibility, but not
     selectable), then by how disruptive pulling them in would be (free time
     first, then paperwork, co-teaching, escolta'm - the order is configurable
-    via NonTeachingHoursPriority), then by fewest substitutions already done
-    (ascending), then name. Eligibility requires: not the absent teacher,
-    active, some combination of non-teaching blocks (any kind) covering the
-    whole requested window, and not out themselves (own absence) during it.
+    via NonTeachingHoursPriority), then by least substitution time already
+    covered (the summed duration of their past substitutions, ascending), then
+    name. Eligibility requires: not the absent teacher, active, some combination
+    of non-teaching blocks (any kind) covering the whole requested window, and
+    not out themselves (own absence) during it.
 
     Each returned Teacher has `same_grade`, `already_substituting`,
-    `disruption_priority`, `is_fully_free` and `coverage_kind_label` attributes
-    set, so callers (e.g. templates) can show which tier a candidate falls in
-    and whether they can be picked."""
+    `disruption_priority`, `is_fully_free`, `coverage_kind_label`,
+    `coverage_done` (a timedelta) and `coverage_done_label` attributes set, so
+    callers (e.g. templates) can show which tier a candidate falls in and
+    whether they can be picked."""
     return _find_available_substitutes_for_range(absence, absence.start_datetime, absence.end_datetime)
 
 
