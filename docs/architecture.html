@@ -1,0 +1,601 @@
+<title>Doplent Architecture</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,600;12..96,700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+
+<style>
+  :root {
+    --ground: #f4f4fa;
+    --surface: #ffffff;
+    --surface-2: #fbfbff;
+    --ink: #22223a;
+    --ink-muted: #63637e;
+    --ink-faint: #9797ac;
+    --border: #e5e4f0;
+    --border-strong: #d6d5e6;
+    --accent: #4f46e5;
+    --accent-soft: #ecebfb;
+    --ext: #b4530a;
+    --ext-soft: #fbefe1;
+    --ok: #15803d;
+    --shadow: 0 1px 2px rgba(30, 27, 75, .04), 0 12px 32px rgba(30, 27, 75, .05);
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #121218;
+      --surface: #1b1b23;
+      --surface-2: #202029;
+      --ink: #e8e8f1;
+      --ink-muted: #a0a0b6;
+      --ink-faint: #6c6c82;
+      --border: #31313d;
+      --border-strong: #3d3d4b;
+      --accent: #948df4;
+      --accent-soft: #272442;
+      --ext: #e0a45a;
+      --ext-soft: #382b1c;
+      --ok: #52c77f;
+      --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 14px 36px rgba(0, 0, 0, .35);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #121218;
+    --surface: #1b1b23;
+    --surface-2: #202029;
+    --ink: #e8e8f1;
+    --ink-muted: #a0a0b6;
+    --ink-faint: #6c6c82;
+    --border: #31313d;
+    --border-strong: #3d3d4b;
+    --accent: #948df4;
+    --accent-soft: #272442;
+    --ext: #e0a45a;
+    --ext-soft: #382b1c;
+    --ok: #52c77f;
+    --shadow: 0 1px 2px rgba(0, 0, 0, .3), 0 14px 36px rgba(0, 0, 0, .35);
+  }
+
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font: 400 1rem/1.65 "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    font-feature-settings: "cv05", "ss01";
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .wrap { max-width: 68rem; margin: 0 auto; padding: clamp(2.5rem, 6vw, 5.5rem) clamp(1.15rem, 4vw, 2.5rem) 5rem; }
+  .prose { max-width: 44rem; }
+
+  .eyebrow {
+    font: 500 .72rem/1 "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing: .16em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin: 0 0 .9rem;
+  }
+  h1 {
+    font: 700 clamp(2.1rem, 5.4vw, 3.15rem)/1.04 "Bricolage Grotesque", "Inter", sans-serif;
+    letter-spacing: -.022em;
+    text-wrap: balance;
+    margin: 0 0 1.1rem;
+  }
+  .lede { font-size: 1.15rem; color: var(--ink-muted); margin: 0; max-width: 42rem; }
+
+  section { margin-top: clamp(3.5rem, 8vw, 6rem); }
+  h2 {
+    font: 600 clamp(1.45rem, 3vw, 1.8rem)/1.15 "Bricolage Grotesque", "Inter", sans-serif;
+    letter-spacing: -.017em;
+    text-wrap: balance;
+    margin: 0 0 .35rem;
+  }
+  .section-kicker {
+    font: 500 .72rem/1 "IBM Plex Mono", ui-monospace, monospace;
+    letter-spacing: .16em; text-transform: uppercase;
+    color: var(--ink-faint); margin: 0 0 .7rem;
+  }
+  h2 + p { margin-top: .9rem; }
+  p { margin: 1rem 0; }
+  a { color: var(--accent); text-underline-offset: 2px; }
+  strong { font-weight: 600; }
+  code, .mono {
+    font: 400 .88em/1.4 "IBM Plex Mono", ui-monospace, monospace;
+    background: var(--accent-soft);
+    color: var(--ink);
+    padding: .08em .38em;
+    border-radius: .3em;
+  }
+
+  /* ---- figures ---- */
+  figure { margin: 2rem 0 0; }
+  .figscroll { overflow-x: auto; border: 1px solid var(--border); border-radius: 14px; background: var(--surface); box-shadow: var(--shadow); }
+  .figscroll svg { display: block; width: 100%; min-width: 620px; height: auto; padding: clamp(.9rem, 2.5vw, 1.6rem); color: var(--ink-muted); }
+  figcaption { margin-top: .85rem; font-size: .88rem; color: var(--ink-muted); max-width: 44rem; }
+
+  .node { fill: var(--surface-2); stroke: var(--border-strong); stroke-width: 1.5; rx: 9; }
+  .node--accent { stroke: var(--accent); }
+  .node--ext { stroke: var(--ext); stroke-dasharray: 5 3.5; }
+  .lbl { fill: var(--ink); font: 600 13px/1 "Inter", sans-serif; }
+  .lbl--sm { fill: var(--ink-muted); font: 400 11.5px/1 "Inter", sans-serif; }
+  .lbl--mono { fill: var(--ink); font: 500 12px/1 "IBM Plex Mono", monospace; }
+  .lbl--tag { fill: var(--accent); font: 500 10.5px/1 "IBM Plex Mono", monospace; letter-spacing: .06em; }
+  .lbl--tag-ext { fill: var(--ext); }
+  .edge { stroke: currentColor; stroke-width: 1.6; fill: none; }
+  .edge--ext { stroke: var(--ext); stroke-dasharray: 5 3.5; }
+  .edge-lbl { fill: var(--ink-muted); font: 400 11px/1 "Inter", sans-serif; }
+  .zone { fill: var(--accent-soft); opacity: .5; rx: 12; }
+  .zone-lbl { fill: var(--accent); font: 500 10.5px/1 "IBM Plex Mono", monospace; letter-spacing: .1em; }
+
+  /* ---- cards ---- */
+  .cards { display: grid; gap: 1.1rem; grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr)); margin-top: 2rem; }
+  .card {
+    background: var(--surface); border: 1px solid var(--border); border-radius: 14px;
+    padding: 1.35rem 1.4rem 1.5rem; box-shadow: var(--shadow);
+  }
+  .card h3 {
+    margin: 0 0 .1rem;
+    font: 500 .92rem/1.3 "IBM Plex Mono", monospace;
+    color: var(--accent);
+    letter-spacing: -.01em;
+  }
+  .card .role { margin: 0 0 .9rem; font-size: .82rem; color: var(--ink-faint); }
+  .card ul { margin: 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: .6rem; }
+  .card li { font-size: .9rem; line-height: 1.5; padding-left: 1.1rem; position: relative; color: var(--ink); }
+  .card li::before {
+    content: ""; position: absolute; left: 0; top: .55em;
+    width: 6px; height: 6px; border-radius: 2px; background: var(--accent); opacity: .55;
+  }
+  .card li b { font-weight: 600; }
+
+  /* ---- flow steps ---- */
+  ol.flow { counter-reset: step; list-style: none; margin: 2rem 0 0; padding: 0; display: flex; flex-direction: column; gap: 1.1rem; }
+  ol.flow li {
+    counter-increment: step; position: relative; padding: 0 0 0 3.1rem; min-height: 2rem;
+  }
+  ol.flow li::before {
+    content: counter(step); position: absolute; left: 0; top: -.15rem;
+    width: 2rem; height: 2rem; border-radius: 8px;
+    background: var(--accent-soft); color: var(--accent);
+    font: 600 .95rem/2rem "Bricolage Grotesque", sans-serif; text-align: center;
+    border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  }
+  ol.flow li p { margin: 0; }
+  ol.flow li p + p { margin-top: .3rem; font-size: .9rem; color: var(--ink-muted); }
+
+  /* ---- ops grid ---- */
+  .ops { display: grid; gap: 1px; background: var(--border); border: 1px solid var(--border);
+         border-radius: 14px; overflow: hidden; margin-top: 2rem; }
+  .ops > div { background: var(--surface); padding: 1.15rem 1.3rem; }
+  .ops dt { font: 500 .8rem/1 "IBM Plex Mono", monospace; color: var(--ext); letter-spacing: .04em; margin-bottom: .45rem; }
+  .ops dd { margin: 0; font-size: .92rem; line-height: 1.55; color: var(--ink); }
+  @media (min-width: 34rem) { .ops { grid-template-columns: 1fr 1fr; } }
+
+  .note {
+    margin-top: 2rem; border-left: 3px solid var(--accent); padding: .3rem 0 .3rem 1.2rem;
+    color: var(--ink-muted); font-size: .95rem;
+  }
+  .note b { color: var(--ink); font-weight: 600; }
+
+  footer { margin-top: 5rem; padding-top: 2rem; border-top: 1px solid var(--border); font-size: .82rem; color: var(--ink-faint); }
+
+  :focus-visible { outline: 2px solid var(--accent); outline-offset: 3px; border-radius: 3px; }
+  @media (prefers-reduced-motion: no-preference) {
+    a { transition: color .15s; }
+  }
+</style>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">System map · Sept 2026</p>
+    <h1>Doplent Architecture</h1>
+    <p class="lede">
+      A Django app that helps one primary/pre-primary school cover teacher absences: a teacher
+      reports when they're away, the app works out who is genuinely free during that window,
+      and offers get sent, accepted, and turned into a booked substitution.
+    </p>
+  </header>
+
+  <section>
+    <p class="section-kicker">Runtime</p>
+    <h2>The stack</h2>
+    <div class="prose">
+      <p>
+        Server-rendered Django, deployed as a single container on Fly.io. There is no SPA, no
+        API layer, and no task queue &mdash; a request comes in, templates render, the response
+        goes out. Everything reactive on the page is a small block of vanilla JavaScript inside
+        the template it belongs to (the date picker, the substitute-picking grid).
+      </p>
+      <p>
+        The whole dependency list is five packages: <code>Django</code>,
+        <code>dj-database-url</code>, <code>psycopg</code>, <code>whitenoise</code>,
+        <code>gunicorn</code>. Front-end assets (Bootstrap 5, Bootstrap Icons, the Inter
+        typeface) load from a CDN rather than being vendored or bundled.
+      </p>
+    </div>
+
+    <figure>
+      <div class="figscroll">
+        <svg viewBox="0 0 900 500" role="img" aria-label="The request path from browser through Fly.io, Gunicorn, Django middleware and the two apps to PostgreSQL, with GitHub Actions deploying and backing up, and Brevo handling email.">
+          <!-- request path spine -->
+          <text class="zone-lbl" x="40" y="34">REQUEST PATH</text>
+
+          <!-- Browser -->
+          <rect class="node" x="40" y="48" width="300" height="70" rx="9"/>
+          <text class="lbl" x="58" y="74">Browser · teachers &amp; admins</text>
+          <text class="lbl--sm" x="58" y="94">Django templates · Bootstrap 5 · vanilla JS</text>
+          <text class="lbl--sm" x="58" y="109">PWA: manifest + service worker at /sw.js</text>
+
+          <!-- edge browser -> fly -->
+          <path class="edge" d="M190 118 L190 150" marker-end="url(#a)"/>
+          <text class="edge-lbl" x="200" y="139">HTTPS</text>
+
+          <!-- Fly host -->
+          <rect class="zone" x="30" y="150" width="470" height="132"/>
+          <text class="zone-lbl" x="44" y="169">FLY.IO · AMS · ONE SHARED-CPU MACHINE, SCALES TO ZERO</text>
+          <rect class="node" x="46" y="180" width="210" height="86" rx="9"/>
+          <text class="lbl--mono" x="62" y="206">gunicorn</text>
+          <text class="lbl--sm" x="62" y="226">WSGI server</text>
+          <text class="lbl--sm" x="62" y="242">terminates behind Fly's</text>
+          <text class="lbl--sm" x="62" y="256">HTTPS proxy</text>
+          <rect class="node" x="272" y="180" width="212" height="86" rx="9"/>
+          <text class="lbl--mono" x="288" y="206">whitenoise</text>
+          <text class="lbl--sm" x="288" y="226">serves hashed static</text>
+          <text class="lbl--sm" x="288" y="242">files from the image</text>
+
+          <!-- edge fly -> django -->
+          <path class="edge" d="M265 282 L265 314" marker-end="url(#a)"/>
+
+          <!-- Django project -->
+          <rect class="node node--accent" x="46" y="314" width="438" height="76" rx="9"/>
+          <text class="lbl--mono" x="62" y="338">config/  ·  Django 5.2 project</text>
+          <text class="lbl--sm" x="62" y="358">middleware: Security → WhiteNoise → Session →</text>
+          <text class="lbl--sm" x="62" y="373">Catalan locale → CSRF → Auth   ·   URLconf</text>
+
+          <!-- edge django -> apps -->
+          <path class="edge" d="M160 390 L160 420" marker-end="url(#a)"/>
+          <path class="edge" d="M370 390 L370 420" marker-end="url(#a)"/>
+
+          <!-- apps -->
+          <rect class="node node--accent" x="46" y="420" width="200" height="56" rx="9"/>
+          <text class="lbl--mono" x="62" y="444">teachers</text>
+          <text class="lbl--sm" x="62" y="462">roster · schedules · CSV import</text>
+          <rect class="node node--accent" x="284" y="420" width="200" height="56" rx="9"/>
+          <text class="lbl--mono" x="300" y="444">substitutions</text>
+          <text class="lbl--sm" x="300" y="462">matching · offers · notifications</text>
+
+          <!-- edge apps -> db -->
+          <path class="edge" d="M246 448 C 540 448, 560 300, 620 262" marker-end="url(#a)"/>
+          <path class="edge" d="M484 448 C 560 448, 580 300, 632 262" marker-end="url(#a)"/>
+          <text class="edge-lbl" x="540" y="360">Django ORM</text>
+
+          <!-- DB -->
+          <rect class="node node--accent" x="620" y="192" width="238" height="70" rx="9"/>
+          <text class="lbl" x="638" y="218">PostgreSQL</text>
+          <text class="lbl--sm" x="638" y="238">Supabase pooler in prod</text>
+          <text class="lbl--sm" x="638" y="253">SQLite file in dev · via DATABASE_URL</text>
+
+          <!-- Brevo (email) -->
+          <rect class="node node--ext" x="620" y="48" width="238" height="64" rx="9"/>
+          <text class="lbl" x="638" y="72">Brevo</text>
+          <text class="lbl--sm" x="638" y="92">SMTP relay for offer &amp; confirmation mail</text>
+          <path class="edge edge--ext" d="M540 430 C 600 360, 640 200, 700 114" marker-end="url(#ax)"/>
+          <text class="lbl--tag lbl--tag-ext" x="612" y="330">emails.py · sent in-request</text>
+
+          <!-- GitHub Actions -->
+          <rect class="node node--ext" x="620" y="300" width="238" height="90" rx="9"/>
+          <text class="lbl" x="638" y="324">GitHub Actions</text>
+          <text class="lbl--sm" x="638" y="344">push to main → flyctl deploy</text>
+          <text class="lbl--sm" x="638" y="360">(release cmd runs migrations)</text>
+          <text class="lbl--sm" x="638" y="376">nightly cron → encrypted pg_dump</text>
+          <path class="edge edge--ext" d="M620 330 C 540 320, 420 300, 360 288" marker-end="url(#ax)"/>
+
+          <!-- Drive -->
+          <rect class="node node--ext" x="620" y="410" width="238" height="56" rx="9"/>
+          <text class="lbl" x="638" y="434">Google Drive</text>
+          <text class="lbl--sm" x="638" y="452">private folder · 1-year backup retention</text>
+          <path class="edge edge--ext" d="M700 300 L700 410" marker-end="url(#ax)"/>
+          <path class="edge edge--ext" d="M632 262 C 600 300, 640 380, 690 408" marker-end="url(#ax)"/>
+
+          <defs>
+            <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+            </marker>
+            <marker id="ax" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--ext)"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+      <figcaption>
+        Solid indigo edges are one HTTP request travelling down the stack. Dashed amber edges are
+        the third-party services the app talks to &mdash; note that email leaves <em>during</em>
+        the request (no worker), and CI both deploys the app and, on a separate cron, pushes an
+        encrypted database dump off-site.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="section-kicker">Domain</p>
+    <h2>Two apps, one job</h2>
+    <div class="prose">
+      <p>
+        <code>teachers</code> owns <em>who's around and when</em>. <code>substitutions</code>
+        owns <em>arranging cover</em> and calls into <code>teachers</code> for availability.
+        The interesting logic lives in plain modules &mdash; <code>services.py</code>,
+        <code>offers.py</code>, <code>emails.py</code> &mdash; not in the views, which stay thin.
+      </p>
+    </div>
+
+    <div class="cards">
+      <div class="card">
+        <h3>teachers</h3>
+        <p class="role">the roster and the timetable</p>
+        <ul>
+          <li><b>Teacher</b> — one-to-one with a Django auth user; grade level, active flag.</li>
+          <li><b>WeeklyNonTeachingHours</b> — recurring free blocks per weekday, each tagged with a <b>kind</b>: free, paperwork, co-teaching, or <span class="mono">escolta'm</span>.</li>
+          <li><b>NonTeachingHoursPriority</b> — admin-editable ordering that says how readily the picker pulls a teacher off each kind.</li>
+          <li><b>importer.py</b> — all-or-nothing CSV bulk import of teachers and their hours, tolerant of Excel's cp1252.</li>
+          <li><b>calendar.py</b> — lays the whole roster out as one week-grid for the admin.</li>
+          <li>Self-service schedule editor at <span class="mono">/schedule/</span>.</li>
+        </ul>
+      </div>
+      <div class="card">
+        <h3>substitutions</h3>
+        <p class="role">matching, offers, notifications</p>
+        <ul>
+          <li><b>Absence · Substitution · SubstitutionOffer</b> — reported, booked, and pending-decision records.</li>
+          <li><b>services.py</b> — the matching engine: what needs cover, who's free, and <span class="mono">build_coverage_grid()</span> (30-min slots × eligible teachers, ranked by fairness).</li>
+          <li><b>offers.py</b> — the offer lifecycle: create, accept (→ book), decline, and lazy expiry.</li>
+          <li><b>emails.py</b> — four notifications; the confirmation carries a hand-rolled <span class="mono">.ics</span> so the slot lands on a calendar with no calendar API.</li>
+          <li><b>stats.py</b> — course-to-date figures for the admin dashboard.</li>
+          <li><b>dates_ca.py</b> — Catalan weekday and time-range formatting.</li>
+        </ul>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <p class="section-kicker">Data</p>
+    <h2>Data model</h2>
+    <div class="prose">
+      <p>
+        Six tables. An <code>Absence</code> fans out to any number of <code>Substitution</code>s
+        (one teacher rarely covers a whole day) and any number of <code>SubstitutionOffer</code>s.
+        An accepted offer points one-to-one at the <code>Substitution</code> it produced.
+      </p>
+    </div>
+
+    <figure>
+      <div class="figscroll">
+        <svg viewBox="0 0 900 430" role="img" aria-label="Entity diagram: auth User one-to-one Teacher; Teacher one-to-many WeeklyNonTeachingHours, Absence, Substitution and SubstitutionOffer; Absence one-to-many Substitution and SubstitutionOffer; SubstitutionOffer one-to-one its resulting Substitution; NonTeachingHoursKind enumerates the kind on hours and on the priority table.">
+          <!-- auth.User -->
+          <rect class="node" x="36" y="40" width="150" height="50" rx="9"/>
+          <text class="lbl--mono" x="52" y="62">auth.User</text>
+          <text class="lbl--sm" x="52" y="80">Django auth</text>
+
+          <!-- Teacher -->
+          <rect class="node node--accent" x="36" y="150" width="170" height="66" rx="9"/>
+          <text class="lbl--mono" x="52" y="174">Teacher</text>
+          <text class="lbl--sm" x="52" y="193">grade_level</text>
+          <text class="lbl--sm" x="52" y="208">active</text>
+          <path class="edge" d="M111 90 L111 150" marker-end="url(#d)"/>
+          <text class="edge-lbl" x="118" y="124">1—1</text>
+
+          <!-- WeeklyNonTeachingHours -->
+          <rect class="node" x="36" y="292" width="196" height="92" rx="9"/>
+          <text class="lbl--mono" x="52" y="316">WeeklyNonTeaching</text>
+          <text class="lbl--mono" x="52" y="332">Hours</text>
+          <text class="lbl--sm" x="52" y="352">weekday · start · end</text>
+          <text class="lbl--sm" x="52" y="368">kind →</text>
+          <path class="edge" d="M120 216 L120 292" marker-end="url(#d)"/>
+          <text class="edge-lbl" x="126" y="258">1—N</text>
+
+          <!-- Kind enum -->
+          <rect class="node node--ext" x="300" y="300" width="210" height="76" rx="9"/>
+          <text class="lbl--mono" x="316" y="322">NonTeachingHoursKind</text>
+          <text class="lbl--sm" x="316" y="341">free · paperwork ·</text>
+          <text class="lbl--sm" x="316" y="356">co-teaching · escolta'm</text>
+          <path class="edge edge--ext" d="M232 346 L300 342" marker-end="url(#dx)"/>
+
+          <!-- Priority -->
+          <rect class="node" x="560" y="300" width="200" height="76" rx="9"/>
+          <text class="lbl--mono" x="576" y="322">NonTeaching</text>
+          <text class="lbl--mono" x="576" y="338">HoursPriority</text>
+          <text class="lbl--sm" x="576" y="358">kind → · priority</text>
+          <path class="edge edge--ext" d="M510 330 L560 332" marker-end="url(#dx)"/>
+
+          <!-- Absence -->
+          <rect class="node node--accent" x="330" y="44" width="180" height="70" rx="9"/>
+          <text class="lbl--mono" x="346" y="68">Absence</text>
+          <text class="lbl--sm" x="346" y="87">start · end</text>
+          <text class="lbl--sm" x="346" y="102">reason</text>
+          <path class="edge" d="M206 168 C 270 150, 280 110, 330 92" marker-end="url(#d)"/>
+          <text class="edge-lbl" x="248" y="118">teacher · 1—N</text>
+
+          <!-- Substitution -->
+          <rect class="node node--accent" x="600" y="44" width="200" height="86" rx="9"/>
+          <text class="lbl--mono" x="616" y="68">Substitution</text>
+          <text class="lbl--sm" x="616" y="87">start · end</text>
+          <text class="lbl--sm" x="616" y="103">absence → </text>
+          <text class="lbl--sm" x="616" y="119">substitute_teacher →</text>
+          <path class="edge" d="M510 76 L600 79" marker-end="url(#d)"/>
+          <text class="edge-lbl" x="524" y="66">1—N</text>
+          <path class="edge" d="M206 176 C 420 250, 640 220, 690 130" marker-end="url(#d)"/>
+          <text class="edge-lbl" x="430" y="238">substitute · N—1</text>
+
+          <!-- SubstitutionOffer -->
+          <rect class="node node--accent" x="330" y="160" width="210" height="104" rx="9"/>
+          <text class="lbl--mono" x="346" y="184">SubstitutionOffer</text>
+          <text class="lbl--sm" x="346" y="203">start · end</text>
+          <text class="lbl--sm" x="346" y="219">status: pending / accepted</text>
+          <text class="lbl--sm" x="346" y="234">/ declined / expired</text>
+          <text class="lbl--sm" x="346" y="250">decline_reason</text>
+          <path class="edge" d="M420 114 L426 160" marker-end="url(#d)"/>
+          <text class="edge-lbl" x="432" y="140">absence · 1—N</text>
+          <path class="edge" d="M206 196 C 260 210, 290 210, 330 210" marker-end="url(#d)"/>
+          <text class="edge-lbl" x="228" y="188">substitute · N—1</text>
+          <path class="edge" d="M540 208 C 620 200, 660 170, 690 130" marker-end="url(#d)"/>
+          <text class="edge-lbl" x="556" y="186">resulting_substitution · 1—1</text>
+
+          <defs>
+            <marker id="d" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+            </marker>
+            <marker id="dx" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="var(--ext)"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+      <figcaption>
+        Indigo boxes are the domain tables; the dashed amber pieces are the non-teaching-hours
+        <em>kind</em> &mdash; an enum shared by the hours themselves and the priority table that
+        ranks them.
+      </figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="section-kicker">Core flow</p>
+    <h2>How a substitution gets arranged</h2>
+    <div class="prose">
+      <p>
+        Nothing is booked without the candidate's consent. Picking a teacher sends a
+        <em>pending offer</em>; a confirmed <code>Substitution</code> only exists once someone
+        accepts.
+      </p>
+    </div>
+
+    <ol class="flow">
+      <li>
+        <p>A teacher reports an absence &mdash; date, time range in 30-minute steps, reason. The form refuses a window with nothing to cover (all lunch, all outside hours, or entirely the reporter's own free time).</p>
+      </li>
+      <li>
+        <p>They land on the picker. <span class="mono">build_coverage_grid()</span> draws 30-minute rows across the absence &mdash; non-cover stretches shown as labelled bands &mdash; and a column per teacher free for at least one slot that still needs cover.</p>
+        <p>Columns lead with the narrowest availability, then whoever has covered least this school year. Cells are coloured by non-teaching kind.</p>
+      </li>
+      <li>
+        <p>Whoever's arranging cover clicks free cells to build periods and hits <b>Send offers</b>. One <span class="mono">SubstitutionOffer</span> (pending) per contiguous run per teacher, each with an email to the candidate.</p>
+        <p>The period is now locked &mdash; no one else can be offered it until the candidate replies.</p>
+      </li>
+      <li>
+        <p><b>Accept</b> → <span class="mono">accept_offer()</span> creates the <span class="mono">Substitution</span>, emails a confirmation with an <span class="mono">.ics</span> attachment, tells the reporter, and expires any overlapping sibling offers.</p>
+        <p><b>Decline</b> (with a reason) → the reporter is notified and the slot opens back up in the grid, flagged red so you know who already said no.</p>
+      </li>
+      <li>
+        <p>A pending offer whose window has passed is flipped to <b>expired</b> lazily &mdash; <span class="mono">expire_stale_offers()</span> runs at the top of the dashboard and picker views. There is no cron for it.</p>
+      </li>
+    </ol>
+
+    <figure>
+      <div class="figscroll">
+        <svg viewBox="0 0 900 300" role="img" aria-label="Offer lifecycle: create_offer produces a pending offer with a notification email; accept_offer moves it to accepted and creates a Substitution; decline_offer moves it to declined and reopens the slot; expire_stale_offers moves an overdue pending offer to expired.">
+          <!-- create -->
+          <text class="lbl--sm" x="40" y="120">pick a teacher</text>
+          <text class="lbl--sm" x="40" y="136">+ a period</text>
+          <path class="edge" d="M132 130 L188 130" marker-end="url(#s)"/>
+          <text class="edge-lbl" x="128" y="112">create_offer()</text>
+
+          <!-- pending -->
+          <rect class="node node--accent" x="190" y="102" width="150" height="56" rx="9"/>
+          <text class="lbl" x="210" y="127">pending</text>
+          <text class="lbl--sm" x="210" y="145">+ notification email</text>
+
+          <!-- pending -> accepted -->
+          <path class="edge" d="M340 118 C 400 96, 440 74, 500 66" marker-end="url(#s)"/>
+          <text class="edge-lbl" x="358" y="86">candidate accepts</text>
+          <text class="edge-lbl" x="358" y="100">— accept_offer()</text>
+
+          <!-- accepted -->
+          <rect class="node node--accent" x="502" y="40" width="160" height="56" rx="9"/>
+          <text class="lbl" x="522" y="65">accepted</text>
+          <text class="lbl--sm" x="522" y="83">expires siblings</text>
+          <path class="edge" d="M662 68 L718 68" marker-end="url(#s)"/>
+          <rect class="node" x="720" y="40" width="150" height="56" rx="9"/>
+          <text class="lbl--mono" x="736" y="63">Substitution</text>
+          <text class="lbl--sm" x="736" y="82">+ confirmation .ics</text>
+
+          <!-- pending -> declined -->
+          <path class="edge" d="M340 142 C 400 164, 440 186, 500 194" marker-end="url(#s)"/>
+          <text class="edge-lbl" x="356" y="184">candidate declines (+ reason)</text>
+          <text class="edge-lbl" x="356" y="198">— decline_offer()</text>
+          <rect class="node" x="502" y="168" width="160" height="56" rx="9"/>
+          <text class="lbl" x="522" y="193">declined</text>
+          <text class="lbl--sm" x="522" y="211">slot reopens · reporter told</text>
+
+          <!-- pending -> expired -->
+          <path class="edge" d="M265 158 L265 232" marker-end="url(#s)"/>
+          <text class="edge-lbl" x="275" y="200">window passes,</text>
+          <text class="edge-lbl" x="275" y="214">still pending</text>
+          <rect class="node" x="190" y="234" width="220" height="46" rx="9"/>
+          <text class="lbl" x="210" y="253">expired</text>
+          <text class="lbl--sm" x="210" y="270">expire_stale_offers() — lazy, on page load</text>
+
+          <defs>
+            <marker id="s" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+              <path d="M0 0 L10 5 L0 10 z" fill="currentColor"/>
+            </marker>
+          </defs>
+        </svg>
+      </div>
+      <figcaption>The state a <code>SubstitutionOffer</code> moves through, and what each transition triggers. Only <em>accepted</em> produces a booked <code>Substitution</code>.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <p class="section-kicker">Ops</p>
+    <h2>Runtime &amp; operations</h2>
+    <div class="prose">
+      <p>
+        Everything below is free-tier or near it, chosen so one person can run it without a
+        platform team.
+      </p>
+    </div>
+
+    <dl class="ops">
+      <div>
+        <dt>hosting — fly.io</dt>
+        <dd>One <span class="mono">shared-cpu-1x</span> / 512&nbsp;MB machine in <span class="mono">ams</span>, <span class="mono">auto_stop_machines</span> so it sleeps when idle. Docker image; the deploy release command runs migrations.</dd>
+      </div>
+      <div>
+        <dt>database — supabase</dt>
+        <dd>Managed Postgres over the session pooler (port 5432 &mdash; the direct host is IPv6-only). Local dev falls back to a SQLite file automatically.</dd>
+      </div>
+      <div>
+        <dt>email — brevo</dt>
+        <dd>SMTP relay. Sent synchronously inside the request with a bounded timeout; a teacher with no address on file is skipped silently. Dev prints mail to the console.</dd>
+      </div>
+      <div>
+        <dt>ci/cd — github actions</dt>
+        <dd><span class="mono">fly-deploy.yml</span> ships every push to <span class="mono">main</span>. <span class="mono">db-backup.yml</span> runs nightly: <span class="mono">pg_dump</span> → gzip → GPG&nbsp;AES-256 → a private Google Drive folder, one-year retention.</dd>
+      </div>
+      <div>
+        <dt>front-end delivery</dt>
+        <dd>Bootstrap 5, Bootstrap Icons and Inter from jsDelivr / Google Fonts. WhiteNoise serves the app's own hashed static files. No build step.</dd>
+      </div>
+      <div>
+        <dt>i18n</dt>
+        <dd>Catalan is the default for everyone via a custom middleware that ignores <span class="mono">Accept-Language</span>; English stays available through an in-app cookie switch.</dd>
+      </div>
+    </dl>
+
+    <p class="note">
+      <b>Deliberately absent:</b> no Celery or Redis (offers expire on read, mail sends in-request),
+      no REST framework or SPA (server-rendered templates), no CDN for the app's own assets, and
+      no calendar-provider integration (the <span class="mono">.ics</span> file is built by hand).
+      The trade is latency spikes on cold email sends against having almost nothing to operate.
+    </p>
+  </section>
+
+  <footer>
+    Doplent · Django 5.2 on Python 3.14 · one <span class="mono">config</span> project, two apps
+    (<span class="mono">teachers</span>, <span class="mono">substitutions</span>) · built for a
+    single school.
+  </footer>
+
+</div>
