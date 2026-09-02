@@ -3,7 +3,7 @@ import io
 import secrets
 import string
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, time
 
 from django.contrib.auth.models import User
 from django.db import transaction
@@ -42,12 +42,23 @@ KIND_ALIASES = {
     "escolta_m": NonTeachingHoursKind.ESCOLTAM,
 }
 
+# The header of the "co-teaching head" column - it holds the lead teacher's
+# "First Last" name for co_teaching rows and is blank for every other kind. The
+# space matches the school's spreadsheets; an underscore is accepted too.
+HEAD_COLUMN = "co_teaching head"
+HEAD_COLUMN_ALIASES = (HEAD_COLUMN, "co_teaching_head", "co-teaching head")
+
+EXPORT_COLUMNS = [
+    "first_name", "last_name", "email", "grade_level",
+    "weekday", "start_time", "end_time", "type", HEAD_COLUMN,
+]
+
 CSV_TEMPLATE = (
-    "first_name,last_name,email,grade_level,weekday,start_time,end_time,type\n"
-    "Jane,Doe,jane.doe@example.edu,primary,Monday,08:00,09:30,free\n"
-    "Jane,Doe,jane.doe@example.edu,primary,Monday,13:00,16:00,paperwork\n"
-    "Jane,Doe,jane.doe@example.edu,primary,Wednesday,08:00,12:00,co_teaching\n"
-    "John,Smith,john.smith@example.edu,pre_primary,Tuesday,09:00,10:00,escoltam\n"
+    "first_name,last_name,email,grade_level,weekday,start_time,end_time,type,co_teaching head\n"
+    "Jane,Doe,jane.doe@example.edu,primary,Monday,08:00,09:30,free,\n"
+    "Jane,Doe,jane.doe@example.edu,primary,Monday,13:00,16:00,paperwork,\n"
+    "Jane,Doe,jane.doe@example.edu,primary,Wednesday,08:00,12:00,co_teaching,John Smith\n"
+    "John,Smith,john.smith@example.edu,pre_primary,Tuesday,09:00,10:00,escoltam,\n"
 )
 
 
@@ -109,7 +120,38 @@ def _derive_username(first_name: str, last_name: str) -> str:
     return f"{''.join(first_name.split()).lower()}.{''.join(last_name.split()).lower()}"
 
 
-def _process_row(row: dict, result: ImportResult) -> None:
+@dataclass
+class _BlockSpec:
+    """A non-teaching block parsed from one CSV row, kept aside until every
+    teacher in the file exists so a `co_teaching head` naming a teacher defined
+    further down the CSV still resolves."""
+    teacher: Teacher
+    weekday: int
+    start_time: time
+    end_time: time
+    kind: str
+    head_name: str
+    username: str
+    line_number: int
+
+
+_AMBIGUOUS = object()
+
+
+def _row_get(row: dict, aliases) -> str:
+    for alias in aliases:
+        value = row.get(alias)
+        if value:
+            return value
+    return ""
+
+
+def _normalize_name(name: str) -> str:
+    """Fold a full name to a match key: trimmed, single-spaced, case-insensitive."""
+    return " ".join(name.split()).casefold()
+
+
+def _process_row(row: dict, result: ImportResult, line_number: int) -> _BlockSpec | None:
     first_name = (row.get("first_name") or "").strip()
     last_name = (row.get("last_name") or "").strip()
     email = (row.get("email") or "").strip()
@@ -118,6 +160,7 @@ def _process_row(row: dict, result: ImportResult) -> None:
     start_raw = (row.get("start_time") or "").strip()
     end_raw = (row.get("end_time") or "").strip()
     kind_raw = row.get("type") or ""
+    head_raw = _row_get(row, HEAD_COLUMN_ALIASES).strip()
 
     if not first_name or not last_name:
         raise ValueError(_("first_name and last_name are required"))
@@ -148,27 +191,111 @@ def _process_row(row: dict, result: ImportResult) -> None:
         )
     result.teachers_touched.add(username)
 
-    if weekday_raw or start_raw or end_raw:
-        weekday = _parse_weekday(weekday_raw)
-        start_time = _parse_time(start_raw)
-        end_time = _parse_time(end_raw)
-        kind = _parse_kind(kind_raw)
-        if end_time <= start_time:
-            raise ValueError(_("end_time must be after start_time"))
+    if not (weekday_raw or start_raw or end_raw):
+        if head_raw:
+            raise ValueError(
+                _("'%(column)s' only applies to co_teaching blocks") % {"column": HEAD_COLUMN}
+            )
+        return None
+
+    weekday = _parse_weekday(weekday_raw)
+    start_time = _parse_time(start_raw)
+    end_time = _parse_time(end_raw)
+    kind = _parse_kind(kind_raw)
+    if end_time <= start_time:
+        raise ValueError(_("end_time must be after start_time"))
+    if kind == NonTeachingHoursKind.CO_TEACHING and not head_raw:
+        raise ValueError(
+            _("a co_teaching block needs a '%(column)s' (the lead teacher's first and last name)")
+            % {"column": HEAD_COLUMN}
+        )
+    if kind != NonTeachingHoursKind.CO_TEACHING and head_raw:
+        raise ValueError(
+            _("'%(column)s' only applies to co_teaching blocks") % {"column": HEAD_COLUMN}
+        )
+    return _BlockSpec(
+        teacher=teacher,
+        weekday=weekday,
+        start_time=start_time,
+        end_time=end_time,
+        kind=kind,
+        head_name=head_raw,
+        username=username,
+        line_number=line_number,
+    )
+
+
+def _teacher_name_index() -> dict:
+    """`normalized "First Last" -> Teacher` for every teacher, with `_AMBIGUOUS`
+    stored where two teachers share a name. Built after all rows are processed,
+    so it also covers teachers created earlier in the same import."""
+    index: dict = {}
+    for teacher in Teacher.objects.select_related("user"):
+        key = _normalize_name(f"{teacher.user.first_name} {teacher.user.last_name}")
+        index[key] = _AMBIGUOUS if key in index else teacher
+    return index
+
+
+def _resolve_head(spec: _BlockSpec, name_index: dict, result: ImportResult) -> Teacher | None:
+    match = name_index.get(_normalize_name(spec.head_name))
+    if match is None:
+        result.errors.append(RowError(
+            spec.line_number,
+            str(_("co_teaching head '%(name)s' doesn't match any teacher in the system or this file")
+                % {"name": spec.head_name}),
+        ))
+        return None
+    if match is _AMBIGUOUS:
+        result.errors.append(RowError(
+            spec.line_number,
+            str(_("co_teaching head '%(name)s' matches more than one teacher") % {"name": spec.head_name}),
+        ))
+        return None
+    if match.pk == spec.teacher.pk:
+        result.errors.append(RowError(
+            spec.line_number,
+            str(_("%(username)s can't be the co_teaching head of their own block") % {"username": spec.username}),
+        ))
+        return None
+    return match
+
+
+def _apply_blocks(specs: list[_BlockSpec], result: ImportResult) -> None:
+    """Create (or reconcile) every parsed block now that all teachers exist,
+    resolving each co_teaching block's head against the full roster."""
+    name_index = _teacher_name_index()
+    for spec in specs:
+        head = None
+        if spec.kind == NonTeachingHoursKind.CO_TEACHING:
+            head = _resolve_head(spec, name_index, result)
+            if head is None:
+                continue
+
         block, created = WeeklyNonTeachingHours.objects.get_or_create(
-            teacher=teacher,
-            weekday=weekday,
-            start_time=start_time,
-            end_time=end_time,
-            defaults={"kind": kind},
+            teacher=spec.teacher,
+            weekday=spec.weekday,
+            start_time=spec.start_time,
+            end_time=spec.end_time,
+            defaults={"kind": spec.kind, "head": head},
         )
         if created:
             result.hours_created += 1
-        elif block.kind != kind:
-            raise ValueError(
-                _("type for %(username)s's %(start)s-%(end)s block conflicts with the existing value")
-                % {"username": username, "start": start_raw, "end": end_raw}
-            )
+            continue
+        if block.kind != spec.kind:
+            result.errors.append(RowError(
+                spec.line_number,
+                str(_("type for %(username)s's %(start)s-%(end)s block conflicts with the existing value")
+                    % {
+                        "username": spec.username,
+                        "start": spec.start_time.strftime("%H:%M"),
+                        "end": spec.end_time.strftime("%H:%M"),
+                    }),
+            ))
+            continue
+        head_id = head.pk if head else None
+        if block.head_id != head_id:
+            block.head = head
+            block.save(update_fields=["head"])
 
 
 def _decode(raw: bytes) -> str | None:
@@ -192,8 +319,10 @@ def import_teachers_from_csv(uploaded_file) -> ImportResult:
     register a teacher with no hours yet. Each teacher's username is derived
     from their name (lowercase, dot-separated, e.g. "Jane Doe" -> "jane.doe").
     Re-uploading the same file is safe - matching users and non-teaching
-    blocks are left as-is rather than duplicated. If any row fails validation,
-    nothing is saved."""
+    blocks are left as-is rather than duplicated. Co-teaching blocks must name
+    a "co_teaching head" (a teacher's "First Last", resolved against the whole
+    roster including teachers added later in the same file). If any row fails
+    validation, nothing is saved."""
     result = ImportResult()
     content = _decode(uploaded_file.read())
     if content is None:
@@ -208,15 +337,72 @@ def import_teachers_from_csv(uploaded_file) -> ImportResult:
         return result
 
     with transaction.atomic():
+        specs: list[_BlockSpec] = []
         for line_number, row in enumerate(reader, start=2):  # header is line 1
             if not any((value or "").strip() for value in row.values()):
                 continue
             try:
-                _process_row(row, result)
+                spec = _process_row(row, result, line_number)
             except ValueError as exc:
                 result.errors.append(RowError(line_number, str(exc)))
+                continue
+            if spec is not None:
+                specs.append(spec)
+
+        if not result.errors:
+            _apply_blocks(specs, result)
 
         if result.errors:
             transaction.set_rollback(True)
 
     return result
+
+
+def export_teachers_to_csv() -> str:
+    """Serialize every active teacher and their weekly non-teaching hours as a
+    CSV string in the same format import_teachers_from_csv accepts, so the
+    current calendar can be downloaded, edited and re-uploaded without loss.
+    One row per non-teaching block; a teacher with no hours yet gets a single
+    row with the weekday/time columns left blank. Weekdays are written in
+    English and types as their stored codes, both of which the importer
+    understands regardless of the active language. Co-teaching blocks carry
+    their head teacher's "First Last" name in the co_teaching head column."""
+    teachers = (
+        Teacher.objects.filter(active=True)
+        .select_related("user")
+        .prefetch_related("non_teaching_hours__head__user")
+        .order_by("user__last_name", "user__first_name")
+    )
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(EXPORT_COLUMNS)
+    for teacher in teachers:
+        base = [
+            teacher.user.first_name,
+            teacher.user.last_name,
+            teacher.user.email,
+            teacher.grade_level,
+        ]
+        blocks = sorted(
+            teacher.non_teaching_hours.all(),
+            key=lambda block: (block.weekday, block.start_time),
+        )
+        if not blocks:
+            writer.writerow(base + ["", "", "", "", ""])
+            continue
+        for block in blocks:
+            head_name = ""
+            if block.kind == NonTeachingHoursKind.CO_TEACHING and block.head_id:
+                head_name = f"{block.head.user.first_name} {block.head.user.last_name}".strip()
+            writer.writerow(
+                base
+                + [
+                    WeeklyNonTeachingHours.Weekday(block.weekday).name.title(),
+                    block.start_time.strftime("%H:%M"),
+                    block.end_time.strftime("%H:%M"),
+                    block.kind,
+                    head_name,
+                ]
+            )
+    return buffer.getvalue()

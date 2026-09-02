@@ -6,12 +6,14 @@ from django.shortcuts import render
 
 from .calendar import build_week_calendar
 from .forms import TeacherCSVImportForm
-from .importer import CSV_TEMPLATE, import_teachers_from_csv
+from .importer import CSV_TEMPLATE, export_teachers_to_csv, import_teachers_from_csv
 from .models import NonTeachingHoursPriority, Teacher, WeeklyNonTeachingHours
 
 
 class WeeklyNonTeachingHoursInline(admin.TabularInline):
     model = WeeklyNonTeachingHours
+    fk_name = "teacher"
+    fields = ["weekday", "start_time", "end_time", "kind", "head"]
     extra = 2
 
 
@@ -48,6 +50,11 @@ class TeacherAdmin(admin.ModelAdmin):
                 name="teachers_teacher_import_csv_template",
             ),
             path(
+                "export-csv/",
+                self.admin_site.admin_view(self.export_csv),
+                name="teachers_teacher_export_csv",
+            ),
+            path(
                 "weekly-calendar/",
                 self.admin_site.admin_view(self.weekly_calendar),
                 name="teachers_teacher_weekly_calendar",
@@ -67,6 +74,13 @@ class TeacherAdmin(admin.ModelAdmin):
     def download_csv_template(self, request):
         response = HttpResponse(CSV_TEMPLATE, content_type="text/csv")
         response["Content-Disposition"] = 'attachment; filename="teachers_template.csv"'
+        return response
+
+    def export_csv(self, request):
+        if not self.has_view_permission(request):
+            raise PermissionDenied
+        response = HttpResponse(export_teachers_to_csv(), content_type="text/csv")
+        response["Content-Disposition"] = 'attachment; filename="teachers.csv"'
         return response
 
     def import_csv(self, request):

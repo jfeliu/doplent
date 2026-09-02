@@ -14,7 +14,9 @@ def edit_schedule(request):
     queryset = teacher.non_teaching_hours.all()
 
     if request.method == "POST":
-        formset = NonTeachingHoursFormSet(request.POST, queryset=queryset)
+        formset = NonTeachingHoursFormSet(
+            request.POST, queryset=queryset, form_kwargs={"owner": teacher}
+        )
         if formset.is_valid():
             instances = formset.save(commit=False)
             for instance in instances:
@@ -24,6 +26,6 @@ def edit_schedule(request):
                 obj.delete()
             return redirect("dashboard")
     else:
-        formset = NonTeachingHoursFormSet(queryset=queryset)
+        formset = NonTeachingHoursFormSet(queryset=queryset, form_kwargs={"owner": teacher})
 
     return render(request, "teachers/schedule.html", {"formset": formset})

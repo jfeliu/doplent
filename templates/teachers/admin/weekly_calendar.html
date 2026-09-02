@@ -109,6 +109,9 @@
   {% endblocktranslate %}
 </p>
 
+<p><a href="{% url 'admin:teachers_teacher_export_csv' %}">{% translate "Download as CSV" %}</a>
+  {% translate "(active teachers, in the import format)" %}</p>
+
 {% if not has_entries %}
 <p>{% translate "No teacher has entered any non-teaching hours yet." %}</p>
 {% endif %}

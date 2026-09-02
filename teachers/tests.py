@@ -1,4 +1,6 @@
+import csv
 import datetime
+import io
 
 from django.contrib.auth.models import Permission, User
 from django.contrib.contenttypes.models import ContentType
@@ -6,8 +8,11 @@ from django.core.files.uploadedfile import SimpleUploadedFile
 from django.test import TestCase, override_settings
 from django.urls import reverse
 
+from django.core.exceptions import ValidationError
+
 from .calendar import LANE_MIN_WIDTH, build_week_calendar
-from .importer import import_teachers_from_csv
+from .forms import NonTeachingHoursForm
+from .importer import export_teachers_to_csv, import_teachers_from_csv
 from .models import NonTeachingHoursKind, Teacher, WeeklyNonTeachingHours
 
 
@@ -22,15 +27,21 @@ def make_teacher(first_name: str, last_name: str, active: bool = True) -> Teache
     return Teacher.objects.create(user=user, grade_level=Teacher.GradeLevel.PRIMARY, active=active)
 
 
-def add_hours(teacher: Teacher, weekday: int, start: str, end: str, kind: str = NonTeachingHoursKind.FREE):
+def add_hours(
+    teacher: Teacher, weekday: int, start: str, end: str,
+    kind: str = NonTeachingHoursKind.FREE, head: Teacher | None = None,
+):
     start_hour, start_minute = (int(part) for part in start.split(":"))
     end_hour, end_minute = (int(part) for part in end.split(":"))
+    if kind == NonTeachingHoursKind.CO_TEACHING and head is None:
+        head = make_teacher("head", f"of_{teacher.user.username}")
     return WeeklyNonTeachingHours.objects.create(
         teacher=teacher,
         weekday=weekday,
         start_time=datetime.time(start_hour, start_minute),
         end_time=datetime.time(end_hour, end_minute),
         kind=kind,
+        head=head,
     )
 
 
@@ -136,15 +147,20 @@ class ImportTeachersFromCsvTests(TestCase):
 
     def test_type_column_sets_kind_per_block(self):
         content = (
-            "first_name,last_name,email,grade_level,weekday,start_time,end_time,type\n"
-            "Jane,Doe,,primary,Monday,08:00,09:30,paperwork\n"
-            "Jane,Doe,,primary,Monday,10:00,12:00,co_teaching\n"
-            "Jane,Doe,,primary,Monday,13:00,16:00,free\n"
+            "first_name,last_name,email,grade_level,weekday,start_time,end_time,type,co_teaching head\n"
+            "Jane,Doe,,primary,Monday,08:00,09:30,paperwork,\n"
+            "Jane,Doe,,primary,Monday,10:00,12:00,co_teaching,John Smith\n"
+            "Jane,Doe,,primary,Monday,13:00,16:00,free,\n"
+            "John,Smith,,primary,,,,\n"
         )
         result = import_teachers_from_csv(csv_file(content))
 
-        self.assertTrue(result.ok)
+        self.assertTrue(result.ok, result.errors)
         teacher = Teacher.objects.get(user__username="jane.doe")
+        self.assertEqual(
+            teacher.non_teaching_hours.get(start_time=datetime.time(10, 0)).head.user.get_full_name(),
+            "John Smith",
+        )
         self.assertEqual(
             teacher.non_teaching_hours.get(start_time=datetime.time(8, 0)).kind,
             NonTeachingHoursKind.PAPERWORK,
@@ -244,6 +260,191 @@ class ImportTeachersFromCsvTests(TestCase):
         self.assertEqual(username, "maryjane.vanderberg")
 
 
+@override_settings(LANGUAGE_CODE="en")
+class CoTeachingHeadImportTests(TestCase):
+    HEADER = "first_name,last_name,email,grade_level,weekday,start_time,end_time,type,co_teaching head\n"
+
+    def test_co_teaching_row_without_a_head_is_rejected(self):
+        content = self.HEADER + "Jane,Doe,,primary,Monday,10:00,12:00,co_teaching,\n"
+
+        result = import_teachers_from_csv(csv_file(content))
+
+        self.assertFalse(result.ok)
+        self.assertEqual(result.errors[0].line_number, 2)
+        self.assertFalse(WeeklyNonTeachingHours.objects.exists())
+
+    def test_head_resolves_to_an_existing_teacher(self):
+        make_teacher("John", "Smith")
+        content = self.HEADER + "Jane,Doe,,primary,Monday,10:00,12:00,co_teaching,John Smith\n"
+
+        result = import_teachers_from_csv(csv_file(content))
+
+        self.assertTrue(result.ok, result.errors)
+        block = WeeklyNonTeachingHours.objects.get(kind=NonTeachingHoursKind.CO_TEACHING)
+        self.assertEqual(block.head.user.username, "john.smith")
+
+    def test_head_can_be_defined_further_down_the_same_file(self):
+        content = self.HEADER + (
+            "Jane,Doe,,primary,Monday,10:00,12:00,co_teaching,John Smith\n"
+            "John,Smith,,primary,,,,\n"
+        )
+
+        result = import_teachers_from_csv(csv_file(content))
+
+        self.assertTrue(result.ok, result.errors)
+        self.assertEqual(
+            WeeklyNonTeachingHours.objects.get().head.user.username, "john.smith"
+        )
+
+    def test_unknown_head_name_rolls_the_whole_import_back(self):
+        content = self.HEADER + (
+            "Jane,Doe,,primary,Monday,08:00,09:00,free,\n"
+            "Jane,Doe,,primary,Monday,10:00,12:00,co_teaching,Nobody Here\n"
+        )
+
+        result = import_teachers_from_csv(csv_file(content))
+
+        self.assertFalse(result.ok)
+        self.assertIn("Nobody Here", result.errors[0].message)
+        self.assertFalse(Teacher.objects.exists())
+
+    def test_a_teacher_cannot_be_their_own_head(self):
+        content = self.HEADER + "Jane,Doe,,primary,Monday,10:00,12:00,co_teaching,Jane Doe\n"
+
+        result = import_teachers_from_csv(csv_file(content))
+
+        self.assertFalse(result.ok)
+        self.assertFalse(WeeklyNonTeachingHours.objects.exists())
+
+    def test_head_on_a_non_co_teaching_row_is_rejected(self):
+        make_teacher("John", "Smith")
+        content = self.HEADER + "Jane,Doe,,primary,Monday,10:00,12:00,free,John Smith\n"
+
+        result = import_teachers_from_csv(csv_file(content))
+
+        self.assertFalse(result.ok)
+
+    def test_reimporting_the_same_file_keeps_the_head_and_adds_nothing(self):
+        make_teacher("John", "Smith")
+        content = self.HEADER + "Jane,Doe,,primary,Monday,10:00,12:00,co_teaching,John Smith\n"
+        import_teachers_from_csv(csv_file(content))
+
+        second = import_teachers_from_csv(csv_file(content))
+
+        self.assertTrue(second.ok, second.errors)
+        self.assertEqual(second.hours_created, 0)
+        self.assertEqual(
+            WeeklyNonTeachingHours.objects.get().head.user.username, "john.smith"
+        )
+
+
+@override_settings(LANGUAGE_CODE="en")
+class CoTeachingHeadModelAndFormTests(TestCase):
+    def _block(self, teacher, kind, head):
+        return WeeklyNonTeachingHours(
+            teacher=teacher, weekday=MONDAY,
+            start_time=datetime.time(10, 0), end_time=datetime.time(11, 0),
+            kind=kind, head=head,
+        )
+
+    def test_model_clean_requires_a_head_for_co_teaching(self):
+        jane = make_teacher("Jane", "Doe")
+        with self.assertRaises(ValidationError):
+            self._block(jane, NonTeachingHoursKind.CO_TEACHING, None).clean()
+
+    def test_model_clean_drops_a_stray_head_on_non_co_teaching(self):
+        jane, john = make_teacher("Jane", "Doe"), make_teacher("John", "Smith")
+        block = self._block(jane, NonTeachingHoursKind.FREE, john)
+        block.clean()
+        self.assertIsNone(block.head)
+
+    def test_model_clean_rejects_being_your_own_head(self):
+        jane = make_teacher("Jane", "Doe")
+        with self.assertRaises(ValidationError):
+            self._block(jane, NonTeachingHoursKind.CO_TEACHING, jane).clean()
+
+    def test_schedule_form_head_choices_exclude_self_and_inactive(self):
+        jane = make_teacher("Jane", "Doe")
+        john = make_teacher("John", "Smith")
+        make_teacher("Gone", "Away", active=False)
+        form = NonTeachingHoursForm(owner=jane)
+        self.assertEqual(list(form.fields["head"].queryset), [john])
+
+    def test_schedule_form_flags_a_co_teaching_row_with_no_head(self):
+        jane = make_teacher("Jane", "Doe")
+        form = NonTeachingHoursForm(
+            owner=jane,
+            data={
+                "weekday": MONDAY, "start_time": "10:00", "end_time": "11:00",
+                "kind": NonTeachingHoursKind.CO_TEACHING, "head": "",
+            },
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("head", form.errors)
+
+
+@override_settings(LANGUAGE_CODE="en")
+class ExportTeachersToCsvTests(TestCase):
+    def test_blocks_are_written_one_row_each_in_the_import_format(self):
+        jane = make_teacher("Jane", "Doe")
+        jane.user.email = "jane@example.edu"
+        jane.user.save()
+        add_hours(jane, WeeklyNonTeachingHours.Weekday.MONDAY, "08:00", "09:30")
+        add_hours(
+            jane,
+            WeeklyNonTeachingHours.Weekday.WEDNESDAY,
+            "10:00",
+            "12:00",
+            kind=NonTeachingHoursKind.PAPERWORK,
+        )
+
+        rows = list(csv.DictReader(io.StringIO(export_teachers_to_csv())))
+
+        self.assertEqual(
+            [(r["weekday"], r["start_time"], r["end_time"], r["type"]) for r in rows],
+            [("Monday", "08:00", "09:30", "free"), ("Wednesday", "10:00", "12:00", "paperwork")],
+        )
+        self.assertEqual(rows[0]["first_name"], "Jane")
+        self.assertEqual(rows[0]["email"], "jane@example.edu")
+
+    def test_teacher_without_hours_gets_a_single_blank_row(self):
+        make_teacher("Ann", "Lee")
+
+        rows = list(csv.DictReader(io.StringIO(export_teachers_to_csv())))
+
+        self.assertEqual(len(rows), 1)
+        self.assertEqual((rows[0]["weekday"], rows[0]["start_time"], rows[0]["type"]), ("", "", ""))
+
+    def test_inactive_teachers_are_left_out(self):
+        add_hours(make_teacher("Gone", "Away", active=False), WeeklyNonTeachingHours.Weekday.MONDAY, "08:00", "09:00")
+
+        self.assertEqual(list(csv.DictReader(io.StringIO(export_teachers_to_csv()))), [])
+
+    def test_co_teaching_block_carries_the_head_name(self):
+        jane = make_teacher("Jane", "Doe")
+        john = make_teacher("John", "Smith")
+        add_hours(jane, WeeklyNonTeachingHours.Weekday.MONDAY, "10:00", "12:00", kind=NonTeachingHoursKind.CO_TEACHING, head=john)
+
+        rows = {r["type"]: r for r in csv.DictReader(io.StringIO(export_teachers_to_csv()))}
+
+        self.assertEqual(rows["co_teaching"]["co_teaching head"], "John Smith")
+        self.assertEqual(rows[""]["co_teaching head"], "")  # John's blank row
+
+    def test_export_round_trips_through_the_importer(self):
+        jane = make_teacher("Jane", "Doe")
+        john = make_teacher("John", "Smith")
+        add_hours(jane, WeeklyNonTeachingHours.Weekday.MONDAY, "08:00", "09:30")
+        add_hours(jane, WeeklyNonTeachingHours.Weekday.FRIDAY, "13:00", "16:00", kind=NonTeachingHoursKind.CO_TEACHING, head=john)
+
+        result = import_teachers_from_csv(csv_file(export_teachers_to_csv()))
+
+        self.assertTrue(result.ok, result.errors)
+        self.assertEqual(result.hours_created, 0)  # everything already matches
+        self.assertEqual(
+            WeeklyNonTeachingHours.objects.get(kind=NonTeachingHoursKind.CO_TEACHING).head, john
+        )
+
+
 MONDAY = WeeklyNonTeachingHours.Weekday.MONDAY
 
 
@@ -328,6 +529,26 @@ class WeeklyCalendarAdminViewTests(TestCase):
         html = response.content.decode()
         self.assertIn("dilluns", html)  # confirms Catalan really is active
         self.assertNotRegex(html, r"\d,\d")
+
+    def test_calendar_page_links_to_the_csv_export(self):
+        response = self.client.get(reverse("admin:teachers_teacher_weekly_calendar"))
+
+        self.assertContains(response, reverse("admin:teachers_teacher_export_csv"))
+
+    def test_export_endpoint_returns_a_csv_attachment(self):
+        response = self.client.get(reverse("admin:teachers_teacher_export_csv"))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response["Content-Type"], "text/csv")
+        self.assertIn("attachment; filename=", response["Content-Disposition"])
+        self.assertIn("Jane,Doe", response.content.decode())
+
+    def test_export_endpoint_needs_view_permission(self):
+        self.client.force_login(User.objects.create_user(username="nobody", password="pw", is_staff=True))
+
+        response = self.client.get(reverse("admin:teachers_teacher_export_csv"))
+
+        self.assertEqual(response.status_code, 403)
 
 
 class EditScheduleAccessTests(TestCase):

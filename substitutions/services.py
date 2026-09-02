@@ -5,7 +5,12 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
-from teachers.models import NonTeachingHoursKind, NonTeachingHoursPriority, Teacher
+from teachers.models import (
+    NonTeachingHoursKind,
+    NonTeachingHoursPriority,
+    Teacher,
+    WeeklyNonTeachingHours,
+)
 
 from .models import Absence, Substitution, SubstitutionOffer
 
@@ -16,6 +21,7 @@ SLOT_REASON_LABELS = {
     "covered": _("Already covered"),
     "outside_working_hours": _("Outside school hours"),
     "requester_free": _("Your own non-teaching time"),
+    "co_teaching_head": _("Co-taught class you lead - the co-teacher covers it"),
 }
 
 # The school's daily working hours - substitutes are never searched for
@@ -52,6 +58,13 @@ def format_duration(td: timedelta) -> str:
     if hours:
         return f"{hours}h"
     return f"{minutes}m"
+
+
+def coverage_done_for(teacher) -> timedelta:
+    """Total time `teacher` has covered in substitutions since the course year
+    started (see `course_year_start`), as a timedelta."""
+    annotated = _with_coverage_done(Teacher.objects.filter(pk=teacher.pk)).first()
+    return annotated.coverage_done if annotated else timedelta()
 
 
 def _with_coverage_done(teachers):
@@ -180,12 +193,58 @@ def _disruption_priority(candidate: Teacher, segments, priority_by_kind: dict[st
 def coverage_needed(teacher: Teacher, start_dt, end_dt) -> list[tuple[datetime, datetime]]:
     """The sub-intervals of [start_dt, end_dt) that would actually need a
     substitute: the requested range minus the teacher's own weekly non-teaching
-    hours (no one covers a class that wasn't happening anyway) and minus any
-    time outside the school's working hours. Empty when the teacher wasn't due
-    to be teaching for any of the requested time."""
+    hours (no one covers a class that wasn't happening anyway), minus any
+    co-taught class the teacher only leads (the co-teacher holds the room - see
+    `_co_teaching_head_free`), and minus any time outside the school's working
+    hours. Empty when the teacher wasn't due to be teaching for any of the
+    requested time."""
     requester_free = _merged_intervals_for_range(teacher, start_dt, end_dt)
+    head_free = _co_teaching_head_free(teacher, start_dt, end_dt)
     non_working = _outside_working_hours(start_dt, end_dt)
-    return _subtract_intervals(start_dt, end_dt, requester_free + non_working)
+    return _subtract_intervals(start_dt, end_dt, requester_free + head_free + non_working)
+
+
+def _co_teacher_unavailable(teacher_id: int, start_dt, end_dt) -> bool:
+    """Whether the co-teacher can't be relied on to hold a co-taught room alone
+    over [start_dt, end_dt): they're already committed to another substitution
+    then, or they're out on their own absence."""
+    if Substitution.objects.filter(
+        substitute_teacher_id=teacher_id, start_datetime__lt=end_dt, end_datetime__gt=start_dt
+    ).exists():
+        return True
+    return Absence.objects.filter(
+        teacher_id=teacher_id, start_datetime__lt=end_dt, end_datetime__gt=start_dt
+    ).exists()
+
+
+def _co_teaching_head_free(teacher: Teacher, start_dt, end_dt) -> list[tuple[datetime, datetime]]:
+    """Intervals within [start_dt, end_dt) when `teacher` is only the named head
+    of a co-teaching class: the co-teacher runs the room, so the head's absence
+    needs no substitute then - unless that co-teacher is themselves unavailable
+    (see `_co_teacher_unavailable`), in which case the slot is left needing
+    cover like any other teaching time."""
+    led_blocks = list(
+        WeeklyNonTeachingHours.objects.filter(
+            kind=NonTeachingHoursKind.CO_TEACHING, head=teacher
+        ).values_list("teacher_id", "weekday", "start_time", "end_time")
+    )
+    if not led_blocks:
+        return []
+
+    intervals = []
+    for day, seg_start, seg_end in _daily_segments(start_dt, end_dt):
+        for co_teacher_id, weekday, block_start, block_end in led_blocks:
+            if day.weekday() != weekday:
+                continue
+            clipped_start = max(block_start, seg_start)
+            clipped_end = min(block_end, seg_end)
+            if clipped_start >= clipped_end:
+                continue
+            run_start = timezone.make_aware(datetime.combine(day, clipped_start))
+            run_end = timezone.make_aware(datetime.combine(day, clipped_end))
+            if not _co_teacher_unavailable(co_teacher_id, run_start, run_end):
+                intervals.append((run_start, run_end))
+    return intervals
 
 
 def _coverage_segments(absence: Absence, start_dt, end_dt) -> list[tuple[date, time, time]]:
@@ -228,6 +287,8 @@ def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) ->
     (that duration rendered "1h 30m"), alongside `same_grade` and
     `already_substituting`."""
     segments = _coverage_segments(absence, start_dt, end_dt)
+    if not segments:
+        return []  # nothing to cover in this window - no one is "needed"
 
     busy_substituting = set(
         Substitution.objects.filter(
@@ -415,10 +476,11 @@ def grid_slots(absence: Absence) -> list[dict]:
     """The 30-minute slots the picking grid is built from, one per row across the
     whole absence span. Each is `{index, start_datetime, end_datetime, reason}`;
     reason is None when the slot needs a substitute, else "covered",
-    "outside_working_hours" or "requester_free"."""
+    "outside_working_hours", "requester_free" or "co_teaching_head"."""
     span_start, span_end = _slot_span(absence)
     non_working = _outside_working_hours(span_start, span_end)
     requester_free = _merged_intervals_for_range(absence.teacher, span_start, span_end)
+    head_free = _co_teaching_head_free(absence.teacher, span_start, span_end)
     covered = [(sub.start_datetime, sub.end_datetime) for sub in absence.substitutions.all()]
 
     slots = []
@@ -431,6 +493,8 @@ def grid_slots(absence: Absence) -> list[dict]:
             reason = "outside_working_hours"
         elif _overlaps(requester_free, slot_start, slot_end):
             reason = "requester_free"
+        elif _overlaps(head_free, slot_start, slot_end):
+            reason = "co_teaching_head"
         else:
             reason = None
         slots.append(

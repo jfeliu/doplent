@@ -1,4 +1,5 @@
 from django.conf import settings
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
@@ -86,6 +87,21 @@ class WeeklyNonTeachingHours(models.Model):
         default=NonTeachingHoursKind.FREE,
         verbose_name=_("kind"),
     )
+    # For co-teaching blocks only: the teacher who leads the co-taught class.
+    # When the head is absent the co-teacher runs the room, so the head needs no
+    # substitute for that slot (see substitutions.services). Required whenever
+    # kind is co_teaching, and must be someone other than `teacher`. Hard-deleting
+    # the head takes the (now meaningless) co-teaching block with it - in normal
+    # use teachers are deactivated, not deleted, and that keeps the block intact.
+    head = models.ForeignKey(
+        Teacher,
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="co_teaching_led",
+        verbose_name=_("co-teaching head"),
+        help_text=_("The teacher who leads this co-taught class. Required for co-teaching blocks."),
+    )
 
     class Meta:
         ordering = ["weekday", "start_time"]
@@ -93,7 +109,24 @@ class WeeklyNonTeachingHours(models.Model):
         verbose_name_plural = _("weekly non-teaching hours")
         constraints = [
             models.CheckConstraint(check=models.Q(end_time__gt=models.F("start_time")), name="end_after_start"),
+            # "co-teaching needs a head" is enforced in Model.clean(), the import
+            # and the schedule form (every write path), not as a DB check - that
+            # would block migrating databases that already hold headless
+            # co-teaching blocks from before this field existed.
+            models.CheckConstraint(
+                check=~models.Q(head=models.F("teacher")),
+                name="co_teaching_head_is_not_self",
+            ),
         ]
 
     def __str__(self):
         return f"{self.teacher} - {self.get_weekday_display()} {self.start_time}-{self.end_time}"
+
+    def clean(self):
+        super().clean()
+        if self.kind != NonTeachingHoursKind.CO_TEACHING:
+            self.head = None
+        elif self.head_id is None:
+            raise ValidationError({"head": _("A co-teaching block needs a head teacher.")})
+        if self.head_id and self.teacher_id and self.head_id == self.teacher_id:
+            raise ValidationError({"head": _("The head teacher must be a different teacher.")})

@@ -7,8 +7,10 @@
   non-teaching block - repeat a teacher's first and last name across rows to
   give them several blocks, or leave weekday/start_time/end_time blank to add
   a teacher with no hours yet. Usernames are generated automatically from each
-  teacher's name. Re-uploading the same file is safe. If any row is invalid,
-  nothing is saved.
+  teacher's name. A co_teaching block must name the class's head teacher in the
+  "co_teaching head" column ("First Last", a teacher elsewhere in the file or
+  already in the system). Re-uploading the same file is safe. If any row is
+  invalid, nothing is saved.
   {% endblocktranslate %}
 </p>
 <p><a href="{% url 'admin:teachers_teacher_import_csv_template' %}">{% translate "Download CSV template" %}</a></p>

@@ -328,6 +328,7 @@ class FindAvailableSubstitutesTests(TestCase):
                 start_time=datetime.time(8, 0),
                 end_time=datetime.time(16, 0),
                 kind=kind,
+                head=make_teacher(f"{name}_head") if kind == NonTeachingHoursKind.CO_TEACHING else None,
             )
             by_kind[name] = teacher
 
@@ -449,13 +450,16 @@ class PickSubstituteViewTests(TestCase):
         self.assertFalse(SubstitutionOffer.objects.filter(absence=self.absence).exists())
 
 
-def _weekday_block(teacher, start, end, kind=NonTeachingHoursKind.FREE):
+def _weekday_block(teacher, start, end, kind=NonTeachingHoursKind.FREE, head=None):
+    if kind == NonTeachingHoursKind.CO_TEACHING and head is None:
+        head = make_teacher(f"{teacher.user.username}_head")
     return WeeklyNonTeachingHours.objects.create(
         teacher=teacher,
         weekday=WeeklyNonTeachingHours.Weekday.MONDAY,
         start_time=start,
         end_time=end,
         kind=kind,
+        head=head,
     )
 
 
@@ -709,6 +713,59 @@ class WorkingHoursTests(TestCase):
         )
 
         self.assertEqual(uncovered_ranges(absence), [(dt(2024, 1, 8, 16, 30), dt(2024, 1, 8, 17))])
+
+
+class CoTeachingHeadCoverageTests(TestCase):
+    """When the head of a co-taught class is absent, the co-teacher holds the
+    room, so that slot needs no substitute - unless the co-teacher is themselves
+    unavailable then."""
+
+    def setUp(self):
+        # 2024-01-08 is a Monday; _weekday_block always lands on Monday.
+        self.head = make_teacher("coteach_head")
+        self.co_teacher = make_teacher("coteach_support")
+        _weekday_block(
+            self.co_teacher, datetime.time(10, 0), datetime.time(11, 0),
+            kind=NonTeachingHoursKind.CO_TEACHING, head=self.head,
+        )
+        self.absence = Absence.objects.create(
+            teacher=self.head, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
+        )
+
+    def test_head_absence_over_the_co_taught_class_needs_no_substitute(self):
+        self.assertEqual(uncovered_ranges(self.absence), [])
+        self.assertEqual(find_available_substitutes(self.absence), [])
+        grid = build_coverage_grid(self.absence)
+        self.assertFalse(grid["needs_cover"])
+        self.assertEqual({row["reason"] for row in grid["rows"]}, {"co_teaching_head"})
+
+    def test_head_needs_cover_when_the_co_teacher_is_already_substituting(self):
+        other = make_teacher("coteach_other_absentee")
+        other_absence = Absence.objects.create(
+            teacher=other, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
+        )
+        make_substitution(other_absence, self.co_teacher)
+
+        self.assertEqual(
+            uncovered_ranges(self.absence), [(dt(2024, 1, 8, 10), dt(2024, 1, 8, 11))]
+        )
+
+    def test_head_needs_cover_when_the_co_teacher_is_out_on_their_own_absence(self):
+        Absence.objects.create(
+            teacher=self.co_teacher, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 12)
+        )
+
+        self.assertEqual(
+            uncovered_ranges(self.absence), [(dt(2024, 1, 8, 10), dt(2024, 1, 8, 11))]
+        )
+
+    def test_the_co_teachers_own_absence_over_the_block_still_needs_no_cover(self):
+        # Unchanged behaviour: the co-teacher's co_teaching block is their own
+        # non-teaching time, so their absence over it calls for no substitute.
+        co_absence = Absence.objects.create(
+            teacher=self.co_teacher, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
+        )
+        self.assertEqual(uncovered_ranges(co_absence), [])
 
 
 class GridSlotReasonTests(TestCase):

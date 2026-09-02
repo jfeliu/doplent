@@ -337,10 +337,10 @@
         <p class="role">the roster and the timetable</p>
         <ul>
           <li><b>Teacher</b> — one-to-one with a Django auth user; grade level, active flag.</li>
-          <li><b>WeeklyNonTeachingHours</b> — recurring free blocks per weekday, each tagged with a <b>kind</b>: free, paperwork, co-teaching, or <span class="mono">escolta'm</span>.</li>
+          <li><b>WeeklyNonTeachingHours</b> — recurring free blocks per weekday, each tagged with a <b>kind</b>: free, paperwork, co-teaching, or <span class="mono">escolta'm</span>. A co-teaching block also names its <b>head</b> teacher — when the head is absent the co-teacher holds the room, so the picker asks for no substitute then (unless the co-teacher is already busy).</li>
           <li><b>NonTeachingHoursPriority</b> — admin-editable ordering that says how readily the picker pulls a teacher off each kind.</li>
-          <li><b>importer.py</b> — all-or-nothing CSV bulk import of teachers and their hours, tolerant of Excel's cp1252.</li>
-          <li><b>calendar.py</b> — lays the whole roster out as one week-grid for the admin.</li>
+          <li><b>importer.py</b> — all-or-nothing CSV bulk import of teachers and their hours, tolerant of Excel's cp1252; also exports the current roster back out in the same format.</li>
+          <li><b>calendar.py</b> — lays the whole roster out as one week-grid for the admin, with a one-click CSV export of what it shows.</li>
           <li>Self-service schedule editor at <span class="mono">/schedule/</span>.</li>
         </ul>
       </div>

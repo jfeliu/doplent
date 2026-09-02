@@ -9,8 +9,9 @@
   Those are the only times you can be suggested as a substitute. Set each block's
   type - free, paperwork, co-teaching or escolta'm: you'll still be suggested
   during any of them, but the picker draws teachers off free time first and
-  escolta'm last. Leave a row's day blank and it will be ignored; check "Delete"
-  to remove a row.
+  escolta'm last. For a co-teaching block, name the class's head teacher - if
+  they're away, you hold the room, so no substitute is called for them then.
+  Leave a row's day blank and it will be ignored; check "Delete" to remove a row.
   {% endblocktranslate %}
 </p>
 <div class="card">
@@ -31,6 +32,7 @@
               <th>{% translate "Free from" %}</th>
               <th>{% translate "Free until" %}</th>
               <th>{% translate "Type" %}</th>
+              <th>{% translate "Co-teaching head" %}</th>
               <th>{% translate "Delete" %}</th>
             </tr>
           </thead>
@@ -41,6 +43,7 @@
               <td>{{ form.start_time }}</td>
               <td>{{ form.end_time }}</td>
               <td>{{ form.kind }}</td>
+              <td>{{ form.head }}{{ form.head.errors }}</td>
               <td>{% if form.instance.pk %}{{ form.DELETE }}{% endif %}</td>
             </tr>
             {% endfor %}
