@@ -26,4 +26,12 @@ RUN DJANGO_DEBUG=False python manage.py collectstatic --noinput
 
 EXPOSE 8000
 
-CMD ["gunicorn","--bind",":8000","--workers","2","config.wsgi"]
+# Access logs to stdout so `fly logs` shows every request. %({fly-client-ip}i)s
+# is the real client IP (Fly terminates TLS at its proxy, so %(h)s would just be
+# the proxy); %(L)s is the request duration in seconds.
+CMD ["gunicorn", "config.wsgi", \
+     "--bind", ":8000", \
+     "--workers", "2", \
+     "--access-logfile", "-", \
+     "--error-logfile", "-", \
+     "--access-logformat", "%({fly-client-ip}i)s \"%(r)s\" %(s)s %(b)s %(L)ss \"%(f)s\" \"%(a)s\""]
