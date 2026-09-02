@@ -11,7 +11,15 @@ from . import emails
 from .forms import AbsenceForm, DeclineOfferForm
 from .models import Absence, Substitution, SubstitutionOffer
 from .offers import accept_offer, create_offer, decline_offer, expire_stale_offers
-from .services import build_coverage_grid, can_offer, grid_slots, uncovered_ranges
+from .services import (
+    build_coverage_grid,
+    can_offer,
+    coverage_done_for,
+    course_year_start,
+    format_duration,
+    grid_slots,
+    uncovered_ranges,
+)
 
 
 @login_required
@@ -29,9 +37,14 @@ def dashboard(request):
     for absence in my_absences:
         absence.is_fully_covered = not uncovered_ranges(absence)
 
-    covering = Substitution.objects.filter(substitute_teacher=teacher).select_related(
-        "absence", "absence__teacher"
+    covering = (
+        Substitution.objects.filter(
+            substitute_teacher=teacher, start_datetime__gte=course_year_start()
+        )
+        .select_related("absence", "absence__teacher")
+        .order_by("start_datetime")
     )
+    covered_total_label = format_duration(coverage_done_for(teacher))
     my_pending_offers = (
         SubstitutionOffer.objects.filter(substitute_teacher=teacher, status=SubstitutionOffer.Status.PENDING)
         .select_related("absence", "absence__teacher")
@@ -44,6 +57,8 @@ def dashboard(request):
             "teacher": teacher,
             "my_absences": my_absences,
             "covering": covering,
+            "covered_total_label": covered_total_label,
+            "course_year_start": course_year_start(),
             "my_pending_offers": my_pending_offers,
         },
     )

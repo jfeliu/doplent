@@ -692,3 +692,10 @@ msgstr "Docents amb més absències"
 
 msgid "Unspecified"
 msgstr "Sense especificar"
+
+msgid "Total covered this course"
+msgstr "Total cobert aquest curs"
+
+#, python-format
+msgid "Since %(since)s"
+msgstr "Des del %(since)s"

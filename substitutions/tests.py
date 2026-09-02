@@ -1204,6 +1204,44 @@ class DashboardOffersToMeTests(TestCase):
         self.assertNotContains(response, "Coverage requests for you")
 
 
+@override_settings(LANGUAGE_CODE="en")
+class DashboardCoveredTotalTests(TestCase):
+    def test_shows_summed_covered_time_for_the_course_year(self):
+        absent = make_teacher("covered_total_absent")
+        covering = make_teacher("covered_total_covering")
+        a1 = Absence.objects.create(
+            teacher=absent, start_datetime=course_dt(1, 9), end_datetime=course_dt(1, 12)
+        )
+        a2 = Absence.objects.create(
+            teacher=absent, start_datetime=course_dt(2, 9), end_datetime=course_dt(2, 12)
+        )
+        make_substitution(a1, covering, start=course_dt(1, 9), end=course_dt(1, 11))
+        make_substitution(a2, covering, start=course_dt(2, 9), end=course_dt(2, 10, 30))
+        self.client.force_login(covering.user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Total covered this course")
+        self.assertContains(response, "3h 30m")
+
+    def test_last_course_years_substitutions_do_not_count(self):
+        absent = make_teacher("covered_total_lastyear_absent")
+        covering = make_teacher("covered_total_lastyear_covering")
+        old = course_year_start() - datetime.timedelta(days=30)
+        absence = Absence.objects.create(
+            teacher=absent, start_datetime=old, end_datetime=old + datetime.timedelta(hours=3)
+        )
+        make_substitution(
+            absence, covering, start=old, end=old + datetime.timedelta(hours=2)
+        )
+        self.client.force_login(covering.user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "0m")
+        self.assertNotContains(response, "2h")
+
+
 class CaDateFormattingTests(TestCase):
     def test_datetime_rendered_in_school_timezone_not_utc(self):
         """DB datetimes come back as UTC; the ca_datetime helper must convert to
