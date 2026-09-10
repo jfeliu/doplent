@@ -349,7 +349,7 @@
         <p class="role">matching, offers, notifications</p>
         <ul>
           <li><b>Absence · Substitution · SubstitutionOffer</b> — reported, booked, and pending-decision records.</li>
-          <li><b>services.py</b> — the matching engine: what needs cover, who's free, and <span class="mono">build_coverage_grid()</span> (30-min slots × eligible teachers, ranked by fairness).</li>
+          <li><b>services.py</b> — the matching engine: what needs cover, who's free, <span class="mono">build_coverage_grid()</span> (30-min slots × eligible teachers, ranked by fairness), and <span class="mono">coverage_agenda()</span> (every teacher's upcoming cover — confirmed, pending or still open — grouped by day for the dashboard).</li>
           <li><b>offers.py</b> — the offer lifecycle: create, accept (→ book), decline, and lazy expiry.</li>
           <li><b>emails.py</b> — four notifications; the confirmation carries a hand-rolled <span class="mono">.ics</span> so the slot lands on a calendar with no calendar API.</li>
           <li><b>stats.py</b> — course-to-date figures for the admin dashboard.</li>

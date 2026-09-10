@@ -93,4 +93,45 @@
     </div>
   </div>
 </div>
+
+<div class="card mt-4">
+  <div class="card-header"><i class="bi bi-calendar3 text-primary"></i>{% translate "Everyone's coverage" %}</div>
+  {% if agenda %}
+  <ul class="list-group list-group-flush">
+    {% for day in agenda %}
+    <li class="list-group-item py-2 small fw-semibold text-uppercase text-muted" style="letter-spacing:.04em; background:#fafaff;">
+      {{ day.day|ca_date }}
+    </li>
+    {% for entry in day.entries %}
+    {% if entry.absent_teacher.pk == teacher.pk or entry.substitute.pk == teacher.pk %}
+    <li class="list-group-item py-3 d-flex flex-column flex-sm-row justify-content-sm-between align-items-start align-items-sm-center gap-1 border-start border-primary border-3">
+    {% else %}
+    <li class="list-group-item py-3 d-flex flex-column flex-sm-row justify-content-sm-between align-items-start align-items-sm-center gap-1">
+    {% endif %}
+      <div>
+        <div class="fw-semibold">
+          {{ entry.absent_teacher }}<i class="bi bi-arrow-right text-muted mx-2"></i>{% if entry.substitute %}{{ entry.substitute }}{% else %}<span class="text-muted fst-italic fw-normal">{% translate "no substitute yet" %}</span>{% endif %}
+        </div>
+        <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ entry.start|ca_timeframe:entry.end }}</div>
+      </div>
+      {% if entry.status == 'confirmed' %}
+      <span class="badge bg-success-subtle text-success-emphasis text-nowrap"><i class="bi bi-check-circle-fill"></i> {% translate "Confirmed" %}</span>
+      {% elif entry.status == 'pending' %}
+      <span class="badge bg-info-subtle text-info-emphasis text-nowrap"><i class="bi bi-hourglass-split"></i> {% translate "Awaiting confirmation" %}</span>
+      {% else %}
+      <span class="badge bg-warning-subtle text-warning-emphasis text-nowrap"><i class="bi bi-exclamation-triangle-fill"></i> {% translate "Uncovered" %}</span>
+      {% endif %}
+    </li>
+    {% endfor %}
+    {% endfor %}
+  </ul>
+  {% else %}
+  <div class="card-body">
+    <div class="empty-state">
+      <i class="bi bi-calendar-check"></i>
+      {% translate "No upcoming substitutions." %}
+    </div>
+  </div>
+  {% endif %}
+</div>
 {% endblock %}
