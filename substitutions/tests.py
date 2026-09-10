@@ -1242,6 +1242,71 @@ class DashboardCoveredTotalTests(TestCase):
         self.assertNotContains(response, "2h")
 
 
+@override_settings(LANGUAGE_CODE="en")
+class DashboardCoverageAgendaTests(TestCase):
+    """The dashboard's "Everyone's coverage" agenda: all teachers' upcoming
+    substitution activity, confirmed, pending or still uncovered."""
+
+    def setUp(self):
+        self.viewer = make_teacher("agenda_viewer")
+        self.absent = make_teacher("agenda_absent")
+        self.sub = make_teacher("agenda_sub")
+        give_free_all_week(self.sub)
+        self.client.force_login(self.viewer.user)
+
+    def _absence(self, start_hour=9, end_hour=11, day_offset=None):
+        start = next_monday_dt(start_hour) if day_offset is None else course_dt(day_offset, start_hour)
+        end = next_monday_dt(end_hour) if day_offset is None else course_dt(day_offset, end_hour)
+        return Absence.objects.create(teacher=self.absent, start_datetime=start, end_datetime=end)
+
+    def test_confirmed_substitution_shows_requester_and_substitute(self):
+        absence = self._absence()
+        make_substitution(absence, self.sub)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Everyone's coverage")
+        self.assertContains(response, str(self.absent))
+        self.assertContains(response, str(self.sub))
+        self.assertContains(response, "Confirmed")
+
+    def test_pending_offer_shown_as_awaiting_confirmation(self):
+        absence = self._absence()
+        make_offer(absence, self.sub)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, str(self.sub))
+        self.assertContains(response, "Awaiting confirmation")
+
+    def test_absence_with_no_substitute_shown_as_uncovered(self):
+        self._absence()
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "Uncovered")
+        self.assertContains(response, "no substitute yet")
+
+    def test_pending_offer_suppresses_the_uncovered_row_for_that_time(self):
+        absence = self._absence()
+        make_offer(absence, self.sub)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertNotContains(response, "Uncovered")
+
+    def test_past_substitutions_are_not_listed(self):
+        old = course_year_start() + datetime.timedelta(days=1)
+        absence = Absence.objects.create(
+            teacher=self.absent, start_datetime=old, end_datetime=old + datetime.timedelta(hours=2)
+        )
+        make_substitution(absence, self.sub)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertContains(response, "No upcoming substitutions.")
+
+
 class CaDateFormattingTests(TestCase):
     def test_datetime_rendered_in_school_timezone_not_utc(self):
         """DB datetimes come back as UTC; the ca_datetime helper must convert to

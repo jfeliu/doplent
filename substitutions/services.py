@@ -1,3 +1,5 @@
+from collections import defaultdict
+from dataclasses import dataclass
 from datetime import date, datetime, time, timedelta
 
 from django.db.models import DurationField, ExpressionWrapper, F, Q, Sum
@@ -656,3 +658,87 @@ def build_coverage_grid(absence: Absence) -> dict:
         )
         previous_reason = reason
     return {"slots": slots, "columns": columns, "rows": rows, "needs_cover": bool(needs_cover)}
+
+
+@dataclass
+class AgendaEntry:
+    """One continuous time range within a single day on the coverage agenda."""
+
+    start: datetime
+    end: datetime
+    absent_teacher: Teacher
+    substitute: Teacher | None
+    status: str  # "confirmed" | "pending" | "uncovered"
+
+
+def coverage_agenda(now: datetime | None = None) -> list[dict]:
+    """Every teacher's substitution activity from the start of today onward,
+    grouped by day for a per-day agenda. Each returned item is
+    `{"day": <aware datetime at midnight>, "entries": [AgendaEntry, ...]}`,
+    days in chronological order, entries within a day ordered by time.
+
+    An entry is tagged `confirmed` (a confirmed Substitution), `pending` (a
+    SubstitutionOffer still awaiting a response) or `uncovered` (part of an
+    absence with no confirmed substitute and no pending offer over it). Ranges
+    spanning several days are split into one entry per day."""
+    now = now or timezone.now()
+    horizon = timezone.make_aware(datetime.combine(timezone.localtime(now).date(), time.min))
+
+    subs = list(
+        Substitution.objects.filter(end_datetime__gt=horizon).select_related(
+            "absence__teacher__user", "substitute_teacher__user"
+        )
+    )
+    offers = list(
+        SubstitutionOffer.objects.filter(
+            status=SubstitutionOffer.Status.PENDING, end_datetime__gt=horizon
+        ).select_related("absence__teacher__user", "substitute_teacher__user")
+    )
+    absences = (
+        Absence.objects.filter(end_datetime__gt=horizon)
+        .select_related("teacher__user")
+        .prefetch_related("substitutions")
+    )
+
+    pending_by_absence: dict[int, list[tuple[datetime, datetime]]] = defaultdict(list)
+    for offer in offers:
+        pending_by_absence[offer.absence_id].append((offer.start_datetime, offer.end_datetime))
+
+    spans: list[AgendaEntry] = []
+    for sub in subs:
+        spans.append(
+            AgendaEntry(
+                sub.start_datetime, sub.end_datetime, sub.absence.teacher, sub.substitute_teacher, "confirmed"
+            )
+        )
+    for offer in offers:
+        spans.append(
+            AgendaEntry(
+                offer.start_datetime, offer.end_datetime, offer.absence.teacher, offer.substitute_teacher, "pending"
+            )
+        )
+    for absence in absences:
+        for gap_start, gap_end in uncovered_ranges(absence):
+            for start, end in _subtract_intervals(gap_start, gap_end, pending_by_absence.get(absence.pk, [])):
+                spans.append(AgendaEntry(start, end, absence.teacher, None, "uncovered"))
+
+    by_day: dict[date, list[AgendaEntry]] = defaultdict(list)
+    for span in spans:
+        start = max(span.start, horizon)
+        if start >= span.end:
+            continue
+        for day, seg_start, seg_end in _daily_segments(start, span.end):
+            day_start = timezone.make_aware(datetime.combine(day, seg_start))
+            day_end = timezone.make_aware(datetime.combine(day, seg_end))
+            if day_start < day_end:
+                by_day[day].append(
+                    AgendaEntry(day_start, day_end, span.absent_teacher, span.substitute, span.status)
+                )
+
+    agenda = []
+    for day in sorted(by_day):
+        entries = sorted(by_day[day], key=lambda e: (e.start, e.end, str(e.absent_teacher).lower()))
+        agenda.append(
+            {"day": timezone.make_aware(datetime.combine(day, time.min)), "entries": entries}
+        )
+    return agenda

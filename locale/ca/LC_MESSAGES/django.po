@@ -761,3 +761,21 @@ msgstr ""
 msgid "%(username)s can't be the co_teaching head of their own block"
 msgstr ""
 "%(username)s no pot ser el docent principal de codocència del seu propi bloc"
+
+msgid "Everyone's coverage"
+msgstr "Cobertura de tothom"
+
+msgid "no substitute yet"
+msgstr "encara sense substitut"
+
+msgid "Confirmed"
+msgstr "Confirmada"
+
+msgid "Awaiting confirmation"
+msgstr "Pendent de confirmar"
+
+msgid "Uncovered"
+msgstr "Sense cobrir"
+
+msgid "No upcoming substitutions."
+msgstr "No hi ha substitucions properes."

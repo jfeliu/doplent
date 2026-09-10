@@ -14,6 +14,7 @@ from .offers import accept_offer, create_offer, decline_offer, expire_stale_offe
 from .services import (
     build_coverage_grid,
     can_offer,
+    coverage_agenda,
     coverage_done_for,
     course_year_start,
     format_duration,
@@ -60,6 +61,7 @@ def dashboard(request):
             "covered_total_label": covered_total_label,
             "course_year_start": course_year_start(),
             "my_pending_offers": my_pending_offers,
+            "agenda": coverage_agenda(),
         },
     )
 
