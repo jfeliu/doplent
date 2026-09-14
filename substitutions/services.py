@@ -249,6 +249,41 @@ def _co_teaching_head_free(teacher: Teacher, start_dt, end_dt) -> list[tuple[dat
     return intervals
 
 
+def _co_teaching_auto_coverage(teacher: Teacher, start_dt, end_dt) -> list[tuple[datetime, datetime]]:
+    """Intervals within [start_dt, end_dt) when `teacher` is committed to
+    holding a co-taught room alone because its head reported an absence there
+    and no one else covers it (the mirror of `_co_teaching_head_free`, seen
+    from the co-teacher's side) - they're not free to substitute elsewhere
+    during that time, even though the block is nominally their own
+    non-teaching time."""
+    assisted_blocks = list(
+        WeeklyNonTeachingHours.objects.filter(kind=NonTeachingHoursKind.CO_TEACHING, teacher=teacher)
+        .exclude(head__isnull=True)
+        .values_list("head_id", "weekday", "start_time", "end_time")
+    )
+    if not assisted_blocks:
+        return []
+
+    intervals = []
+    for day, seg_start, seg_end in _daily_segments(start_dt, end_dt):
+        for head_id, weekday, block_start, block_end in assisted_blocks:
+            if day.weekday() != weekday:
+                continue
+            clipped_start = max(block_start, seg_start)
+            clipped_end = min(block_end, seg_end)
+            if clipped_start >= clipped_end:
+                continue
+            run_start = timezone.make_aware(datetime.combine(day, clipped_start))
+            run_end = timezone.make_aware(datetime.combine(day, clipped_end))
+            for abs_start, abs_end in Absence.objects.filter(
+                teacher_id=head_id, start_datetime__lt=run_end, end_datetime__gt=run_start
+            ).values_list("start_datetime", "end_datetime"):
+                overlap_start, overlap_end = max(run_start, abs_start), min(run_end, abs_end)
+                if overlap_start < overlap_end and not _co_teacher_unavailable(teacher.pk, overlap_start, overlap_end):
+                    intervals.append((overlap_start, overlap_end))
+    return intervals
+
+
 def _coverage_segments(absence: Absence, start_dt, end_dt) -> list[tuple[date, time, time]]:
     """Segments within [start_dt, end_dt) that actually need a substitute -
     excludes any time the absent teacher's own weekly non-teaching hours
@@ -260,18 +295,31 @@ def _coverage_segments(absence: Absence, start_dt, end_dt) -> list[tuple[date, t
 
 def _candidate_pool(absence: Absence, start_dt, end_dt):
     """Teachers who could conceivably cover part of [start_dt, end_dt): active,
-    not the absent teacher, and not away on their own absence then. Teachers
-    already substituting elsewhere are still included - they're shown in the
-    picker, just not selectable."""
+    not the absent teacher, not away on their own absence then, and not
+    already committed to holding a co-taught room alone over that time (see
+    `_co_teaching_auto_coverage`). Teachers already substituting elsewhere are
+    still included - they're shown in the picker, just not selectable."""
     busy_with_own_absence = (
         Absence.objects.filter(start_datetime__lt=end_dt, end_datetime__gt=start_dt)
         .exclude(pk=absence.pk)
         .values_list("teacher_id", flat=True)
     )
+    co_teaching_assistants = (
+        WeeklyNonTeachingHours.objects.filter(kind=NonTeachingHoursKind.CO_TEACHING)
+        .exclude(head__isnull=True)
+        .values_list("teacher_id", flat=True)
+        .distinct()
+    )
+    busy_auto_covering = [
+        teacher.pk
+        for teacher in Teacher.objects.filter(pk__in=co_teaching_assistants)
+        if _co_teaching_auto_coverage(teacher, start_dt, end_dt)
+    ]
     return (
         Teacher.objects.filter(active=True)
         .exclude(pk=absence.teacher_id)
         .exclude(pk__in=list(busy_with_own_absence))
+        .exclude(pk__in=busy_auto_covering)
         .prefetch_related("non_teaching_hours")
     )
 
@@ -459,6 +507,8 @@ def can_offer(absence: Absence, teacher: Teacher, start_dt, end_dt) -> bool:
         return False
     free = _merged_intervals_for_range(teacher, start_dt, end_dt)
     if not any(run_start <= start_dt and run_end >= end_dt for run_start, run_end in free):
+        return False
+    if _co_teaching_auto_coverage(teacher, start_dt, end_dt):
         return False
     if Substitution.objects.filter(
         substitute_teacher=teacher, start_datetime__lt=end_dt, end_datetime__gt=start_dt

@@ -767,6 +767,48 @@ class CoTeachingHeadCoverageTests(TestCase):
         )
         self.assertEqual(uncovered_ranges(co_absence), [])
 
+    def test_co_teacher_covering_for_the_head_is_not_offered_elsewhere(self):
+        # The head is absent, so self.co_teacher holds the room alone (see
+        # test_head_absence_over_the_co_taught_class_needs_no_substitute) - they
+        # must not also be pickable for someone else's unrelated absence at the
+        # same hour, even though the co_teaching block is nominally their own
+        # non-teaching time.
+        other = make_teacher("coteach_other_absentee")
+        other_absence = Absence.objects.create(
+            teacher=other, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
+        )
+        self.assertNotIn(self.co_teacher, find_available_substitutes(other_absence))
+        grid = build_coverage_grid(other_absence)
+        self.assertNotIn(self.co_teacher.pk, {column["teacher"].pk for column in grid["columns"]})
+        self.assertFalse(can_offer(other_absence, self.co_teacher, dt(2024, 1, 8, 10), dt(2024, 1, 8, 11)))
+
+    def test_co_teacher_free_to_substitute_elsewhere_once_the_head_is_back(self):
+        # Same shape as above, but the following Monday, when the head has no
+        # absence - the co_teaching block is ordinary pullable time again.
+        other = make_teacher("coteach_other_absentee_free")
+        other_absence = Absence.objects.create(
+            teacher=other, start_datetime=dt(2024, 1, 15, 10), end_datetime=dt(2024, 1, 15, 11)
+        )
+        self.assertIn(self.co_teacher, find_available_substitutes(other_absence))
+
+    def test_head_is_never_offered_over_the_co_taught_block_even_when_the_co_teacher_is_absent(self):
+        # Mirror case: the co-teacher (assistant) is absent, so the head simply
+        # teaches the block alone and no substitute is ever sought for it (see
+        # test_the_co_teachers_own_absence_over_the_block_still_needs_no_cover).
+        # The head must not be offered as a substitute for someone else's
+        # absence at that same hour either - they were never marked free then
+        # in the first place, since the co-teaching block only lives on the
+        # co-teacher's own schedule.
+        Absence.objects.create(
+            teacher=self.co_teacher, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
+        )
+        other = make_teacher("coteach_other_absentee2")
+        other_absence = Absence.objects.create(
+            teacher=other, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
+        )
+        self.assertNotIn(self.head, find_available_substitutes(other_absence))
+        self.assertFalse(can_offer(other_absence, self.head, dt(2024, 1, 8, 10), dt(2024, 1, 8, 11)))
+
 
 class GridSlotReasonTests(TestCase):
     def setUp(self):
@@ -1513,3 +1555,94 @@ class CourseYearStartTests(SimpleTestCase):
             course_year_start(datetime.date(2026, 1, 1)),
             timezone.make_aware(datetime.datetime(2025, 9, 1)),
         )
+
+
+class DeleteAbsenceViewTests(TestCase):
+    def setUp(self):
+        self.teacher = make_teacher("delete_absence_teacher", email="reporter@example.edu")
+        self.other_teacher = make_teacher("delete_absence_other")
+
+    def test_anonymous_get_redirects_to_login(self):
+        absence = Absence.objects.create(
+            teacher=self.teacher, start_datetime=next_monday_dt(9), end_datetime=next_monday_dt(11)
+        )
+
+        response = self.client.get(reverse("delete_absence", args=[absence.pk]))
+
+        self.assertEqual(response.status_code, 302)
+        self.assertIn(reverse("login"), response.url)
+
+    def test_another_teachers_absence_is_not_found(self):
+        absence = Absence.objects.create(
+            teacher=self.other_teacher, start_datetime=next_monday_dt(9), end_datetime=next_monday_dt(11)
+        )
+        self.client.force_login(self.teacher.user)
+
+        response = self.client.post(reverse("delete_absence", args=[absence.pk]))
+
+        self.assertEqual(response.status_code, 404)
+        self.assertTrue(Absence.objects.filter(pk=absence.pk).exists())
+
+    def test_get_renders_confirmation_page_for_a_future_absence(self):
+        absence = Absence.objects.create(
+            teacher=self.teacher, start_datetime=next_monday_dt(9), end_datetime=next_monday_dt(11)
+        )
+        self.client.force_login(self.teacher.user)
+
+        response = self.client.get(reverse("delete_absence", args=[absence.pk]))
+
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Absence.objects.filter(pk=absence.pk).exists())
+
+    def test_past_absence_cannot_be_deleted(self):
+        absence = Absence.objects.create(
+            teacher=self.teacher, start_datetime=dt(2024, 1, 8, 9), end_datetime=dt(2024, 1, 8, 11)
+        )
+        self.client.force_login(self.teacher.user)
+
+        response = self.client.post(reverse("delete_absence", args=[absence.pk]))
+
+        self.assertRedirects(response, reverse("dashboard"))
+        self.assertTrue(Absence.objects.filter(pk=absence.pk).exists())
+
+    def test_same_day_absence_cannot_be_deleted(self):
+        today = timezone.localtime()
+        absence = Absence.objects.create(
+            teacher=self.teacher,
+            start_datetime=today.replace(hour=9, minute=0, second=0, microsecond=0),
+            end_datetime=today.replace(hour=23, minute=0, second=0, microsecond=0),
+        )
+        self.client.force_login(self.teacher.user)
+
+        response = self.client.post(reverse("delete_absence", args=[absence.pk]))
+
+        self.assertRedirects(response, reverse("dashboard"))
+        self.assertTrue(Absence.objects.filter(pk=absence.pk).exists())
+
+    def test_future_absence_without_substitution_is_deleted_without_email(self):
+        absence = Absence.objects.create(
+            teacher=self.teacher, start_datetime=next_monday_dt(9), end_datetime=next_monday_dt(11)
+        )
+        self.client.force_login(self.teacher.user)
+
+        response = self.client.post(reverse("delete_absence", args=[absence.pk]))
+
+        self.assertRedirects(response, reverse("dashboard"))
+        self.assertFalse(Absence.objects.filter(pk=absence.pk).exists())
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_confirmed_future_absence_notifies_the_substitute_on_deletion(self):
+        substitute = make_teacher("delete_absence_substitute", email="substitute@example.edu")
+        give_free_all_week(substitute)
+        absence = Absence.objects.create(
+            teacher=self.teacher, start_datetime=next_monday_dt(9), end_datetime=next_monday_dt(11)
+        )
+        make_substitution(absence, substitute)
+        self.client.force_login(self.teacher.user)
+
+        response = self.client.post(reverse("delete_absence", args=[absence.pk]))
+
+        self.assertRedirects(response, reverse("dashboard"))
+        self.assertFalse(Absence.objects.filter(pk=absence.pk).exists())
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["substitute@example.edu"])
