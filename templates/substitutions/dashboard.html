@@ -54,6 +54,11 @@
               <a href="{% url 'pick_substitute' absence.id %}">{% translate "choose a substitute" %}</a>
             </div>
           {% endif %}
+          {% if absence.is_future %}
+            <div class="small mt-2">
+              <a href="{% url 'delete_absence' absence.id %}" class="text-danger"><i class="bi bi-trash"></i> {% translate "Delete" %}</a>
+            </div>
+          {% endif %}
         </li>
         {% endfor %}
       </ul>

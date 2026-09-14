@@ -2,6 +2,7 @@ from django.contrib import messages
 from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
+from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.utils.translation import ngettext
 
@@ -35,8 +36,10 @@ def dashboard(request):
             )
         )
     )
+    today = timezone.now().date()
     for absence in my_absences:
         absence.is_fully_covered = not uncovered_ranges(absence)
+        absence.is_future = absence.start_datetime.date() > today
 
     covering = (
         Substitution.objects.filter(
@@ -79,6 +82,26 @@ def report_absence(request):
     else:
         form = AbsenceForm()
     return render(request, "substitutions/report_absence.html", {"form": form})
+
+
+@login_required
+def delete_absence(request, absence_id):
+    teacher = get_object_or_404(Teacher, user=request.user)
+    absence = get_object_or_404(Absence, pk=absence_id, teacher=teacher)
+
+    if absence.start_datetime.date() <= timezone.now().date():
+        messages.error(request, _("Only future absences can be deleted."))
+        return redirect("dashboard")
+
+    if request.method == "POST":
+        substitutions = list(absence.substitutions.select_related("substitute_teacher"))
+        for substitution in substitutions:
+            emails.send_cancellation_notification(substitution)
+        absence.delete()
+        messages.info(request, _("Absence deleted."))
+        return redirect("dashboard")
+
+    return render(request, "substitutions/delete_absence.html", {"absence": absence})
 
 
 @login_required

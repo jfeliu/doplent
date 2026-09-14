@@ -1,0 +1,25 @@
+{% extends "base.html" %}
+{% load i18n ca_dates %}
+{% block title %}{% translate "Delete absence" %}{% endblock %}
+{% block content %}
+<h1 class="h4 mb-3"><i class="bi bi-trash text-danger me-1"></i>{% translate "Delete absence" %}</h1>
+
+<div class="card mb-3">
+  <div class="card-body">
+    <div class="fw-semibold">{{ absence.start_datetime|ca_timeframe:absence.end_datetime }}</div>
+    {% if absence.reason %}<div class="text-muted small mt-1">{{ absence.get_reason_display }}</div>{% endif %}
+    {% if absence.substitutions.all %}
+    <div class="alert alert-warning d-flex align-items-center gap-2 mt-3 mb-0">
+      <i class="bi bi-exclamation-triangle-fill"></i>
+      {% translate "This absence is already covered. Deleting it will notify the substitute teacher that they no longer need to cover it." %}
+    </div>
+    {% endif %}
+  </div>
+</div>
+
+<form method="post">
+  {% csrf_token %}
+  <button type="submit" class="btn btn-danger"><i class="bi bi-trash"></i> {% translate "Delete absence" %}</button>
+  <a href="{% url 'dashboard' %}" class="btn btn-link">{% translate "Cancel" %}</a>
+</form>
+{% endblock %}

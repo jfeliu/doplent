@@ -1,0 +1,1 @@
+{% load i18n ca_dates %}{% blocktranslate with teacher=substitution.absence.teacher timeframe=substitution.start_datetime|ca_timeframe:substitution.end_datetime %}Your coverage for {{ teacher }} ({{ timeframe }}) has been cancelled - the absence no longer applies.{% endblocktranslate %}

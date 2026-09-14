@@ -94,6 +94,16 @@ def send_absence_covered_notification(substitution) -> None:
     )
 
 
+def send_cancellation_notification(substitution) -> None:
+    subject = _("Cancelled: your coverage for %(teacher)s") % {"teacher": substitution.absence.teacher}
+    _send(
+        substitution.substitute_teacher,
+        subject,
+        "substitutions/email/cancellation.txt",
+        {"substitution": substitution},
+    )
+
+
 def send_offer_declined_notification(offer) -> None:
     subject = _("%(teacher)s can't cover your absence") % {"teacher": offer.substitute_teacher}
     _send(offer.absence.teacher, subject, "substitutions/email/offer_declined.txt", {"offer": offer})

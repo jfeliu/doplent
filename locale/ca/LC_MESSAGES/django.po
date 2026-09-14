@@ -779,3 +779,30 @@ msgstr "Sense cobrir"
 
 msgid "No upcoming substitutions."
 msgstr "No hi ha substitucions properes."
+
+msgid "Only future absences can be deleted."
+msgstr "Només es poden eliminar absències futures."
+
+msgid "Absence deleted."
+msgstr "Absència eliminada."
+
+#, python-format
+msgid "Cancelled: your coverage for %(teacher)s"
+msgstr "Cancel·lat: la teva cobertura per a %(teacher)s"
+
+msgid "Delete absence"
+msgstr "Elimina l'absència"
+
+msgid ""
+"This absence is already covered. Deleting it will notify the substitute "
+"teacher that they no longer need to cover it."
+msgstr ""
+"Aquesta absència ja està coberta. En eliminar-la s'avisarà el docent "
+"substitut que ja no cal que la cobreixi."
+
+msgid "Cancel"
+msgstr "Cancel·la"
+
+#, python-format
+msgid "Your coverage for %(teacher)s (%(timeframe)s) has been cancelled - the absence no longer applies."
+msgstr "S'ha cancel·lat la teva cobertura per a %(teacher)s (%(timeframe)s) - l'absència ja no és vigent."
