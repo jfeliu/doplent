@@ -1,1 +1,4 @@
 {% load i18n ca_dates %}{% blocktranslate with substitute=substitution.substitute_teacher timeframe=substitution.start_datetime|ca_timeframe:substitution.end_datetime %}{{ substitute }} will cover your absence for {{ timeframe }}.{% endblocktranslate %}
+{% if substitution.substitute_teacher.calendar_url %}
+{% blocktranslate with substitute=substitution.substitute_teacher calendar_url=substitution.substitute_teacher.calendar_url %}{{ substitute }}'s calendar: {{ calendar_url }}{% endblocktranslate %}
+{% endif %}

@@ -83,7 +83,12 @@
         </div>
         {% for sub in covering %}
         <div class="list-group-item py-3">
-          <div class="fw-semibold">{{ sub.absence.teacher }}</div>
+          <div class="fw-semibold">
+            {{ sub.absence.teacher }}
+            {% if sub.absence.teacher.calendar_url %}
+            <a href="{{ sub.absence.teacher.calendar_url }}" target="_blank" rel="noopener" class="ms-1" title="{% blocktranslate with teacher=sub.absence.teacher %}{{ teacher }}'s calendar{% endblocktranslate %}"><i class="bi bi-calendar3"></i></a>
+            {% endif %}
+          </div>
           <div class="text-muted small"><i class="bi bi-clock-history me-1"></i>{{ sub.start_datetime|ca_timeframe:sub.end_datetime }}</div>
         </div>
         {% empty %}

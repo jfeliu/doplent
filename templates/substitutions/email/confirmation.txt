@@ -1,3 +1,6 @@
 {% load i18n ca_dates %}{% blocktranslate with teacher=substitution.absence.teacher timeframe=substitution.start_datetime|ca_timeframe:substitution.end_datetime %}You're confirmed to cover {{ timeframe }} for {{ teacher }}.{% endblocktranslate %}
+{% if substitution.absence.teacher.calendar_url %}
+{% blocktranslate with teacher=substitution.absence.teacher calendar_url=substitution.absence.teacher.calendar_url %}{{ teacher }}'s calendar: {{ calendar_url }}{% endblocktranslate %}
+{% endif %}
 
 {% translate "A calendar file is attached." %}

@@ -101,6 +101,12 @@ msgstr "etapa educativa"
 msgid "active"
 msgstr "actiu"
 
+msgid "calendar link"
+msgstr "enllaç al calendari"
+
+msgid "Link to this teacher's calendar. Shown when relevant if set."
+msgstr "Enllaç al calendari d'aquest o aquesta docent. Es mostra quan sigui rellevant si s'ha establert."
+
 msgid "teacher"
 msgstr "docent"
 
@@ -457,12 +463,24 @@ msgstr "Motiu: %(reason)s"
 msgid "Respond here:"
 msgstr "Respon aquí:"
 
+#, python-format
+msgid "%(teacher)s's calendar: %(calendar_url)s"
+msgstr "Calendari de %(teacher)s: %(calendar_url)s"
+
+#, python-format
+msgid "%(teacher)s's calendar"
+msgstr "Calendari de %(teacher)s"
+
 msgid "A calendar file is attached."
 msgstr "S'adjunta un fitxer de calendari."
 
 #, python-format
 msgid "%(substitute)s will cover your absence for %(timeframe)s."
 msgstr "%(substitute)s cobrirà la teva absència per a %(timeframe)s."
+
+#, python-format
+msgid "%(substitute)s's calendar: %(calendar_url)s"
+msgstr "Calendari de %(substitute)s: %(calendar_url)s"
 
 #, python-format
 msgid ""

@@ -2,4 +2,7 @@
 {% if offer.absence.reason %}
 {% blocktranslate with reason=offer.absence.reason %}Reason: {{ reason }}{% endblocktranslate %}
 {% endif %}
+{% if offer.absence.teacher.calendar_url %}
+{% blocktranslate with teacher=offer.absence.teacher calendar_url=offer.absence.teacher.calendar_url %}{{ teacher }}'s calendar: {{ calendar_url }}{% endblocktranslate %}
+{% endif %}
 {% translate "Respond here:" %} {{ url }}

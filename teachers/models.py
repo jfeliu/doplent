@@ -12,6 +12,11 @@ class Teacher(models.Model):
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="teacher")
     grade_level = models.CharField(max_length=20, choices=GradeLevel.choices, verbose_name=_("grade level"))
     active = models.BooleanField(default=True, verbose_name=_("active"))
+    calendar_url = models.URLField(
+        blank=True,
+        verbose_name=_("calendar link"),
+        help_text=_("Link to this teacher's calendar. Shown when relevant if set."),
+    )
 
     class Meta:
         ordering = ["user__last_name", "user__first_name"]
