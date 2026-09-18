@@ -36,6 +36,8 @@ class NonTeachingHoursKind(models.TextChoices):
     PAPERWORK = "paperwork", _("Paperwork")
     CO_TEACHING = "co_teaching", _("Co-teaching")
     ESCOLTAM = "escoltam", _("Escolta'm")
+    POESIA = "poesia", "POESIA"
+    CICLE = "cicle", "Cicle"
 
 
 class NonTeachingHoursPriority(models.Model):
