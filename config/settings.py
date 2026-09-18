@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 
 import dj_database_url
+from django.contrib.messages import constants as message_constants
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -65,6 +66,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'teachers',
+    'schedule',
     'substitutions',
 ]
 
@@ -186,6 +188,13 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 LOGIN_URL = 'login'
 LOGIN_REDIRECT_URL = 'dashboard'
 LOGOUT_REDIRECT_URL = 'login'
+
+# Bootstrap has no .alert-error class - map the messages framework's default
+# "error" tag to "danger" so error messages actually render in red instead of
+# silently falling back to an unstyled box.
+MESSAGE_TAGS = {
+    message_constants.ERROR: 'danger',
+}
 
 
 # Email (used to notify teachers of substitution offers)

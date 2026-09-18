@@ -183,6 +183,7 @@
           <a class="nav-link" href="{% url 'report_absence' %}"><i class="bi bi-calendar-plus"></i>{% translate "Report absence" %}</a>
           {% if user.is_staff %}
           <a class="nav-link" href="{% url 'edit_schedule' %}"><i class="bi bi-clock"></i>{% translate "My schedule" %}</a>
+          <a class="nav-link" href="{% url 'group_list' %}"><i class="bi bi-calendar-week"></i>{% translate "Class groups" %}</a>
           <a class="nav-link" href="{% url 'admin:index' %}"><i class="bi bi-shield-lock"></i>{% translate "Admin" %}</a>
           {% endif %}
           <form method="post" action="{% url 'logout' %}" class="d-inline">
@@ -208,8 +209,8 @@
   <main class="container pb-5">
     {% if messages %}
       {% for message in messages %}
-        <div class="alert alert-info d-flex align-items-center gap-2">
-          <i class="bi bi-info-circle"></i>{{ message }}
+        <div class="alert alert-{{ message.tags|default:"info" }} d-flex align-items-center gap-2">
+          <i class="bi {% if message.tags == "danger" %}bi-exclamation-triangle{% elif message.tags == "warning" %}bi-exclamation-circle{% elif message.tags == "success" %}bi-check-circle{% else %}bi-info-circle{% endif %}"></i>{{ message }}
         </div>
       {% endfor %}
     {% endif %}

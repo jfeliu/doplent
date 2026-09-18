@@ -1,0 +1,6 @@
+{% load i18n %}
+{% for opt in teacher_options %}
+<option value="{{ opt.teacher.pk }}"{% if opt.teacher.pk == selected_id %} selected{% endif %}>
+  {{ opt.teacher }}{% if opt.is_tutor %} ({% translate "tutor" %}){% endif %} — {{ opt.hours_label }}
+</option>
+{% endfor %}

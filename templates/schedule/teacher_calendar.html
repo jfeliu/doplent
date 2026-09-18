@@ -1,0 +1,167 @@
+{% extends "base.html" %}
+{% load i18n l10n %}
+{% block title %}{{ teacher }} - {% translate "Full calendar" %}{% endblock %}
+{% block extra_head %}
+<style>
+  .calendar-intro { color: #6b6c80; max-width: 60em; }
+  .calendar-wrap {
+    display: flex;
+    border: 1px solid var(--surface-border);
+    border-radius: .6rem;
+    overflow: hidden;
+    background: #fff;
+    box-shadow: var(--surface-shadow);
+  }
+  .calendar-times { width: 56px; flex: none; border-right: 1px solid var(--surface-border); }
+  .calendar-days { display: flex; flex: 1; min-width: 0; overflow-x: auto; }
+  .calendar-day { flex: 1 0 auto; border-right: 1px solid var(--surface-border); }
+  .calendar-day:last-child { border-right: none; }
+  .calendar-header {
+    height: 36px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 600;
+    font-size: .75rem;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    border-bottom: 1px solid var(--surface-border);
+    background: #f6f7fb;
+    color: #6b6c80;
+  }
+  .calendar-day-body, .calendar-times-body { position: relative; }
+  .calendar-hour-label {
+    position: absolute;
+    left: 0;
+    right: 0;
+    transform: translateY(-50%);
+    font-size: .7rem;
+    color: #6b6c80;
+    text-align: right;
+    padding-right: 6px;
+  }
+  .calendar-gridline { position: absolute; left: 0; right: 0; border-top: 1px solid var(--surface-border); }
+  .calendar-block {
+    position: absolute;
+    box-sizing: border-box;
+    padding: 2px 5px;
+    margin: 0 1px;
+    border-radius: 4px;
+    overflow: hidden;
+    font-size: .7rem;
+    line-height: 1.25;
+    --block-color: #94a3b8;
+    background: color-mix(in srgb, var(--block-color) 20%, #fff);
+    border-left: 3px solid var(--block-color);
+  }
+  .calendar-block.teaching { --block-color: #4f46e5; }
+  .calendar-block.non-free {
+    border-left-style: dashed;
+    background: repeating-linear-gradient(
+      45deg,
+      color-mix(in srgb, var(--block-color) 14%, #fff),
+      color-mix(in srgb, var(--block-color) 14%, #fff) 5px,
+      color-mix(in srgb, var(--block-color) 22%, #fff) 5px,
+      color-mix(in srgb, var(--block-color) 22%, #fff) 10px
+    );
+  }
+  .calendar-block-label,
+  .calendar-block-time { display: block; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .calendar-block-label { font-weight: 600; color: #22223a; }
+  .calendar-block-time { color: #6b6c80; }
+  .calendar-block.inline { display: flex; align-items: baseline; gap: 4px; padding: 1px 4px; font-size: .65rem; }
+  .calendar-block.inline .calendar-block-label { flex: 1 1 auto; min-width: 0; }
+  .calendar-block.inline .calendar-block-time { flex: none; }
+  .calendar-block-label.wrap {
+    white-space: normal;
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    line-clamp: 2;
+  }
+  .calendar-legend { margin-top: .75rem; font-size: .8rem; color: #6b6c80; display: flex; align-items: center; gap: 1.5em; flex-wrap: wrap; }
+  .calendar-legend-swatch { display: inline-block; width: .9em; height: .9em; border-radius: 3px; vertical-align: -.15em; margin-right: .35em; background: var(--sw-color, #94a3b8); }
+  .calendar-legend-swatch.non-free {
+    background: repeating-linear-gradient(45deg, #6b6c80, #6b6c80 2px, transparent 2px, transparent 4px);
+    box-shadow: inset 0 0 0 1px var(--surface-border);
+  }
+
+  /* Fixed width so picking a longer/shorter name doesn't reflow the header. */
+  .sched-switcher { width: 12rem; text-overflow: ellipsis; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-1">
+  <h1 class="h4 mb-0"><i class="bi bi-person-check text-primary me-1"></i>{{ teacher }}</h1>
+  <div class="d-flex flex-wrap gap-2">
+    <select class="form-select form-select-sm sched-switcher" onchange="if(this.value){location.href=this.value}">
+      <option value="">{% translate "Class group timetable…" %}</option>
+      {% for g in all_groups %}
+      <option value="{% url 'group_schedule' g.pk %}">{{ g.name }}</option>
+      {% endfor %}
+    </select>
+    <select class="form-select form-select-sm sched-switcher" onchange="location.href=this.value">
+      {% for t in all_teachers %}
+      <option value="{% url 'teacher_calendar' t.pk %}" {% if t.pk == teacher.pk %}selected{% endif %}>{{ t }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+<p class="text-muted mb-1">
+  {% blocktranslate trimmed with hours=hours_label %}{{ hours }} taught per week, across every class group{% endblocktranslate %}
+</p>
+<p class="calendar-intro mb-3">
+  {% blocktranslate trimmed %}
+  Solid blocks are classes they teach (across every class group); striped
+  blocks are their recorded non-teaching time. Two blocks stacked side by
+  side in the same slot mean a scheduling conflict - they'd need to be in two
+  places at once.
+  {% endblocktranslate %}
+</p>
+
+{% if not has_entries %}
+<p class="text-muted">{% translate "Nothing recorded yet for this teacher." %}</p>
+{% endif %}
+
+{% localize off %}
+<div class="calendar-wrap">
+  <div class="calendar-times">
+    <div class="calendar-header">&nbsp;</div>
+    <div class="calendar-times-body" style="height: {{ calendar_height }}px;">
+      {% for hour in hours %}
+      <div class="calendar-hour-label" style="top: {{ hour.top }}%;">{{ hour.label }}</div>
+      {% endfor %}
+    </div>
+  </div>
+  <div class="calendar-days">
+    {% for day in days %}
+    <div class="calendar-day" style="min-width: {{ day.min_width }}px;">
+      <div class="calendar-header">{{ day.label }}</div>
+      <div class="calendar-day-body" style="height: {{ calendar_height }}px;">
+        {% for hour in hours %}
+        <div class="calendar-gridline" style="top: {{ hour.top }}%;"></div>
+        {% endfor %}
+        {% for block in day.blocks %}
+        <div class="calendar-block{% if block.kind == 'teaching' %} teaching{% else %} non-free{% endif %}{% if block.inline %} inline{% endif %}"
+             style="top: {{ block.top }}%; height: {{ block.height }}%; left: {{ block.left }}%; width: {{ block.width }}%;"
+             title="{{ block.label }}{% if block.detail %} · {{ block.detail }}{% endif %} ({{ block.start|time:'H:i' }}–{{ block.end|time:'H:i' }})">
+          <span class="calendar-block-label{% if block.wrap %} wrap{% endif %}">{{ block.label }}</span>
+          {% if block.show_time %}
+          <span class="calendar-block-time">{{ block.start|time:"H:i" }}–{{ block.end|time:"H:i" }}</span>
+          {% endif %}
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</div>
+{% endlocalize %}
+
+<div class="calendar-legend">
+  <span><span class="calendar-legend-swatch" style="--sw-color: #4f46e5;"></span>{% translate "Teaching a class" %}</span>
+  <span><span class="calendar-legend-swatch non-free"></span>{% translate "Non-teaching time (free, paperwork, co-teaching or escolta'm)" %}</span>
+</div>
+
+{% include "schedule/_hours_summary.html" %}
+{% endblock %}

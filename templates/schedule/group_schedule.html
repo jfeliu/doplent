@@ -1,0 +1,258 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{{ class_group.name }} - {% translate "Timetable" %}{% endblock %}
+{% block extra_head %}
+<style>
+  .sched-scroll { overflow-x: auto; border: 1px solid var(--bs-border-color); border-radius: .6rem; }
+  .sched-grid {
+    display: grid;
+    grid-template-columns: 4.5rem repeat(5, minmax(6rem, 1fr));
+    font-size: .8rem;
+    min-width: max-content;
+  }
+  .sched-grid > div, .sched-grid > label {
+    border-right: 1px solid var(--bs-border-color); border-bottom: 1px solid var(--bs-border-color);
+  }
+  .sched-head {
+    position: sticky; top: 0; z-index: 2;
+    background: var(--bs-tertiary-bg, #f1f1f8);
+    padding: .4rem .5rem; text-align: center; font-weight: 600;
+  }
+  .sched-corner { position: sticky; top: 0; left: 0; z-index: 4; background: var(--bs-body-bg); }
+  .sched-time {
+    position: sticky; left: 0; z-index: 1;
+    background: var(--bs-body-bg); padding: .25rem .4rem; text-align: right;
+    opacity: .7; white-space: nowrap; font-variant-numeric: tabular-nums;
+  }
+
+  label.sched-cell { display: block; cursor: pointer; margin: 0; }
+  label.sched-cell input { position: absolute; opacity: 0; pointer-events: none; }
+  label.sched-cell .sched-fill {
+    display: flex; align-items: center; justify-content: center;
+    height: 100%; min-height: 1.9rem;
+  }
+  label.sched-cell:hover .sched-fill { background: #eef2ff; }
+  label.sched-cell.selected .sched-fill {
+    background: var(--bs-primary, #4f46e5); color: #fff; font-weight: 700;
+    box-shadow: inset 0 0 0 2px rgba(255,255,255,.6);
+  }
+  label.sched-cell:not(.sched-cell-occupied).selected .sched-fill::after { content: "\2713"; }
+
+  label.sched-cell-occupied {
+    --cell-color: #94a3b8;
+  }
+  label.sched-cell-occupied .sched-fill {
+    background: color-mix(in srgb, var(--cell-color) 18%, var(--bs-body-bg, #fff));
+    border-left: 3px solid var(--cell-color);
+    flex-direction: column; align-items: flex-start; justify-content: center;
+    padding: .2rem .35rem; line-height: 1.2; text-align: left;
+  }
+  label.sched-cell-occupied .subject,
+  label.sched-cell-occupied .teacher {
+    display: block; width: 100%; white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  label.sched-cell-occupied .subject { font-weight: 600; }
+  label.sched-cell-occupied .teacher { color: #6b6c80; font-size: .7rem; }
+  label.sched-cell-occupied.selected .sched-fill {
+    background: var(--cell-color); border-left-color: var(--cell-color);
+  }
+  label.sched-cell-occupied.selected .subject,
+  label.sched-cell-occupied.selected .teacher { color: #fff; }
+
+  .sched-band {
+    grid-column: 2 / -1;
+    min-height: .6rem;
+    display: flex; align-items: center; justify-content: center;
+    background: repeating-linear-gradient(45deg, transparent, transparent 6px, rgba(0,0,0,.045) 6px, rgba(0,0,0,.045) 7px);
+    font-size: .68rem; color: #8a8ba0;
+  }
+  .sched-time-band { opacity: .35; }
+
+  .sched-bar {
+    position: sticky; bottom: 0; z-index: 5;
+    background: var(--bs-body-bg); border-top: 1px solid var(--bs-border-color);
+    padding: .75rem 0; margin-top: 1rem;
+    display: flex; flex-wrap: wrap; align-items: center; gap: .75rem;
+  }
+
+  /* Fixed width so picking a longer/shorter name doesn't reflow the header. */
+  .sched-switcher { width: 12rem; text-overflow: ellipsis; }
+</style>
+{% endblock %}
+{% block content %}
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-2">
+  <h1 class="h4 mb-0"><i class="bi bi-calendar-week text-primary me-1"></i>{{ class_group.name }}</h1>
+  <div class="d-flex flex-wrap gap-2">
+    <select class="form-select form-select-sm sched-switcher" onchange="location.href=this.value">
+      {% for g in all_groups %}
+      <option value="{% url 'group_schedule' g.pk %}" {% if g.pk == class_group.pk %}selected{% endif %}>{{ g.name }}</option>
+      {% endfor %}
+    </select>
+    <select class="form-select form-select-sm sched-switcher" onchange="if(this.value){location.href=this.value}">
+      <option value="">{% translate "Teacher's calendar…" %}</option>
+      {% for t in all_teachers %}
+      <option value="{% url 'teacher_calendar' t.pk %}">{{ t }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</div>
+<p class="text-muted mb-3">
+  {% translate "Tutors" %}:
+  {% for tutor in class_group.tutors.all %}{{ tutor }}{% if not forloop.last %}, {% endif %}{% empty %}—{% endfor %}
+  {% if group_hours_label %}
+  · {% blocktranslate trimmed with hours=group_hours_label %}{{ hours }} scheduled this week{% endblocktranslate %}
+  {% endif %}
+</p>
+
+{% if not subjects or not teacher_options %}
+<p class="text-muted">
+  {% if not subjects %}
+  {% translate "No subjects yet." %} <a href="{% url 'admin:schedule_subject_add' %}">{% translate "Add one" %}</a>
+  {% else %}
+  {% translate "No active teachers yet." %}
+  {% endif %}
+</p>
+{% else %}
+<form method="post">
+  {% csrf_token %}
+  <div class="row g-2 mb-3 align-items-end">
+    <div class="col-auto">
+      <label class="form-label mb-0 small text-muted">{% translate "Subject" %}</label>
+      <select name="subject" class="form-select form-select-sm" required>
+        {% for s in subjects %}
+        <option value="{{ s.pk }}"{% if s.pk == selected_subject_id %} selected{% endif %}>{{ s.name }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-auto">
+      <label class="form-label mb-0 small text-muted">{% translate "Teacher" %}</label>
+      <select name="teacher" class="form-select form-select-sm" required>
+        {% include "schedule/_teacher_option_list.html" with selected_id=selected_teacher_id %}
+      </select>
+    </div>
+    <div class="col-auto">
+      {% include "schedule/_co_teacher_picker.html" with existing_co_teachers=selected_co_teachers %}
+    </div>
+  </div>
+
+  <p class="text-muted small mb-2">
+    {% translate "Click open slots to assign them to the subject/teacher above. Click an existing class's slots to update or remove just that selection - even part of a longer class." %}
+  </p>
+
+  <div class="sched-scroll">
+    <div class="sched-grid">
+      <div class="sched-corner"></div>
+      {% for value, label in weekday_labels %}<div class="sched-head">{{ label }}</div>{% endfor %}
+
+      {% for row in rows %}
+      {% if row.is_band %}
+      <div class="sched-time sched-time-band"></div>
+      <div class="sched-band">{% translate "Lunch" %}</div>
+      {% else %}
+      <div class="sched-time">{{ row.start_time|time:"H:i" }}</div>
+      {% for cell in row.cells %}
+        {% if cell.occupied_entry %}
+        <label class="sched-cell sched-cell-occupied" data-entry="{{ cell.occupied_entry.pk }}" style="--cell-color: {{ cell.color }};">
+          <input type="checkbox" name="occupied_cell" value="{{ cell.weekday }}:{{ cell.start_time|time:'H:i' }}|{{ cell.occupied_entry.pk }}">
+          <span class="sched-fill">
+            <span class="subject">{{ cell.occupied_entry.subject }}</span>
+            <span class="teacher">{{ cell.occupied_entry.teacher }}{% for ct in cell.occupied_entry.co_teachers.all %} + {{ ct }}{% endfor %}</span>
+          </span>
+        </label>
+        {% else %}
+        <label class="sched-cell">
+          <input type="checkbox" name="cell" value="{{ cell.weekday }}:{{ cell.start_time|time:'H:i' }}">
+          <span class="sched-fill"></span>
+        </label>
+        {% endif %}
+      {% endfor %}
+      {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="sched-bar">
+    <span id="sched-summary" class="text-muted"
+          data-suffix="{% translate "slots selected" %}"
+          data-mixed="{% translate "Select either open slots to assign, or existing slots to update/remove - not both." %}">
+      {% translate "Nothing selected" %}
+    </span>
+    <div class="ms-auto d-flex gap-2">
+      <button type="submit" id="sched-submit" class="btn btn-primary btn-sm" disabled
+              formaction="{% url 'group_schedule' class_group.pk %}"
+              data-create-action="{% url 'group_schedule' class_group.pk %}"
+              data-create-label="{% translate "Assign selected slots" %}"
+              data-edit-action="{% url 'edit_selected_schedule_entries' class_group.pk %}"
+              data-edit-label="{% translate "Update selected slots" %}">
+        {% translate "Assign selected slots" %}
+      </button>
+      <button type="submit" id="sched-delete-btn" formaction="{% url 'delete_selected_schedule_entries' class_group.pk %}"
+              formmethod="post" formnovalidate class="btn btn-outline-danger btn-sm" hidden
+              onclick="return confirm('{% translate "Remove the selected slots from the timetable?" %}')">
+        {% translate "Delete selected" %}
+      </button>
+    </div>
+  </div>
+</form>
+
+<script>
+(function () {
+  var cells = Array.prototype.slice.call(document.querySelectorAll("label.sched-cell"));
+  var summary = document.getElementById("sched-summary");
+  var submit = document.getElementById("sched-submit");
+  var deleteBtn = document.getElementById("sched-delete-btn");
+  summary.dataset.empty = summary.textContent.trim();
+
+  function setMode(action, label, enabled) {
+    submit.hidden = false;
+    submit.disabled = !enabled;
+    submit.setAttribute("formaction", action);
+    submit.textContent = label;
+  }
+
+  function render() {
+    var free = [], occupied = [];
+    cells.forEach(function (c) {
+      var checked = c.querySelector("input").checked;
+      c.classList.toggle("selected", checked);
+      if (!checked) return;
+      (c.dataset.entry ? occupied : free).push(c);
+    });
+
+    deleteBtn.hidden = true;
+
+    if (free.length && !occupied.length) {
+      setMode(submit.dataset.createAction, submit.dataset.createLabel, true);
+      summary.textContent = free.length + " " + summary.dataset.suffix;
+      summary.classList.remove("text-muted");
+    } else if (occupied.length && !free.length) {
+      setMode(submit.dataset.editAction, submit.dataset.editLabel, true);
+      deleteBtn.hidden = false;
+      summary.textContent = occupied.length + " " + summary.dataset.suffix;
+      summary.classList.remove("text-muted");
+    } else if (free.length && occupied.length) {
+      setMode(submit.dataset.createAction, submit.dataset.createLabel, false);
+      summary.textContent = summary.dataset.mixed;
+      summary.classList.remove("text-muted");
+    } else {
+      setMode(submit.dataset.createAction, submit.dataset.createLabel, false);
+      summary.textContent = summary.dataset.empty;
+      summary.classList.add("text-muted");
+    }
+  }
+
+  cells.forEach(function (c) {
+    c.addEventListener("click", function (e) {
+      e.preventDefault();
+      var input = c.querySelector("input");
+      input.checked = !input.checked;
+      render();
+    });
+  });
+  render();
+})();
+</script>
+{% endif %}
+
+{% include "schedule/_hours_summary.html" %}
+{% endblock %}

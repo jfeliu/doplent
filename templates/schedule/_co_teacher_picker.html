@@ -1,0 +1,57 @@
+{% load i18n %}
+<div class="co-teacher-picker">
+  <label class="form-label mb-0 small text-muted d-block">{% translate "Co-teachers" %}</label>
+  <div class="co-teacher-rows">
+    {% for co in existing_co_teachers %}
+    <div class="input-group input-group-sm mb-1 co-teacher-row">
+      <select name="co_teacher" class="form-select form-select-sm">
+        <option value="">{% translate "— none —" %}</option>
+        {% include "schedule/_teacher_option_list.html" with selected_id=co.pk %}
+      </select>
+      <button type="button" class="btn btn-outline-secondary co-teacher-remove" aria-label="{% translate 'Remove' %}">&times;</button>
+    </div>
+    {% endfor %}
+  </div>
+  <template class="co-teacher-template">
+    <option value="">{% translate "— none —" %}</option>
+    {% include "schedule/_teacher_option_list.html" %}
+  </template>
+  <button type="button" class="btn btn-outline-secondary btn-sm co-teacher-add">
+    <i class="bi bi-plus-lg"></i> {% translate "Add co-teacher" %}
+  </button>
+</div>
+
+<script>
+(function () {
+  document.querySelectorAll(".co-teacher-picker").forEach(function (picker) {
+    if (picker.dataset.wired) { return; }
+    picker.dataset.wired = "1";
+    var rows = picker.querySelector(".co-teacher-rows");
+    var template = picker.querySelector(".co-teacher-template");
+    var addBtn = picker.querySelector(".co-teacher-add");
+
+    function addRow() {
+      var row = document.createElement("div");
+      row.className = "input-group input-group-sm mb-1 co-teacher-row";
+      var select = document.createElement("select");
+      select.name = "co_teacher";
+      select.className = "form-select form-select-sm";
+      select.innerHTML = template.innerHTML;
+      var removeBtn = document.createElement("button");
+      removeBtn.type = "button";
+      removeBtn.className = "btn btn-outline-secondary co-teacher-remove";
+      removeBtn.setAttribute("aria-label", "{% translate 'Remove' %}");
+      removeBtn.innerHTML = "&times;";
+      row.appendChild(select);
+      row.appendChild(removeBtn);
+      rows.appendChild(row);
+    }
+
+    addBtn.addEventListener("click", addRow);
+    rows.addEventListener("click", function (e) {
+      var btn = e.target.closest(".co-teacher-remove");
+      if (btn) { btn.closest(".co-teacher-row").remove(); }
+    });
+  });
+})();
+</script>

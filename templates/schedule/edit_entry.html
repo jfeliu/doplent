@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% load i18n %}
+{% block title %}{% translate "Edit timetable entry" %}{% endblock %}
+{% block content %}
+<h1 class="h4 mb-1"><i class="bi bi-pencil text-primary me-1"></i>{% translate "Edit timetable entry" %}</h1>
+<p class="text-muted mb-3">
+  {{ entry.class_group }} · {{ entry.get_weekday_display }} {{ entry.start_time|time:"H:i" }}–{{ entry.end_time|time:"H:i" }}
+</p>
+
+<div class="card" style="max-width: 32rem;">
+  <div class="card-body p-4">
+    <form method="post">
+      {% csrf_token %}
+      <div class="mb-3">
+        <label class="form-label">{% translate "Subject" %}</label>
+        <select name="subject" class="form-select" required>
+          {% for s in subjects %}
+          <option value="{{ s.pk }}" {% if s.pk == entry.subject_id %}selected{% endif %}>{{ s.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="mb-3">
+        <label class="form-label">{% translate "Teacher" %}</label>
+        <select name="teacher" class="form-select" required>
+          {% for opt in teacher_options %}
+          <option value="{{ opt.teacher.pk }}" {% if opt.teacher.pk == entry.teacher_id %}selected{% endif %}>
+            {{ opt.teacher }}{% if opt.is_tutor %} ({% translate "tutor" %}){% endif %} — {{ opt.hours_label }}
+          </option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="mb-3">
+        {% include "schedule/_co_teacher_picker.html" with existing_co_teachers=entry.co_teachers.all %}
+      </div>
+      <button type="submit" class="btn btn-primary">{% translate "Save" %}</button>
+      <a href="{% url 'group_schedule' entry.class_group_id %}" class="btn btn-link">{% translate "Cancel" %}</a>
+    </form>
+  </div>
+</div>
+{% endblock %}

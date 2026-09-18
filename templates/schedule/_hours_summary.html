@@ -1,0 +1,51 @@
+{% load i18n %}
+<div class="row g-3 mt-1">
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header fw-semibold">{% translate "Hours per teacher" %}</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr>
+              <th>{% translate "Teacher" %}</th>
+              <th class="text-end">{% translate "Teaching" %}</th>
+              <th class="text-end">{% translate "Non-teaching" %}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in teacher_hours_summary %}
+            <tr>
+              <td><a href="{% url 'teacher_calendar' row.teacher.pk %}">{{ row.teacher }}</a></td>
+              <td class="text-end">{{ row.teaching_label }}</td>
+              <td class="text-end text-muted">{{ row.non_teaching_label }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+  <div class="col-md-6">
+    <div class="card h-100">
+      <div class="card-header fw-semibold">{% translate "Hours per class group" %}</div>
+      <div class="card-body p-0">
+        <table class="table table-sm mb-0">
+          <thead>
+            <tr>
+              <th>{% translate "Class group" %}</th>
+              <th class="text-end">{% translate "Scheduled" %}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {% for row in group_hours_summary %}
+            <tr>
+              <td><a href="{% url 'group_schedule' row.class_group.pk %}">{{ row.class_group.name }}</a></td>
+              <td class="text-end">{{ row.hours_label }}</td>
+            </tr>
+            {% endfor %}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+</div>

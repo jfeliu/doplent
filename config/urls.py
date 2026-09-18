@@ -33,5 +33,6 @@ urlpatterns = [
     path("login/", auth_views.LoginView.as_view(), name="login"),
     path("logout/", auth_views.LogoutView.as_view(), name="logout"),
     path("teachers/", include("teachers.urls")),
+    path("groups/", include("schedule.urls")),
     path("", include("substitutions.urls")),
 ]

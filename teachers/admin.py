@@ -4,6 +4,8 @@ from django.http import HttpResponse
 from django.urls import path
 from django.shortcuts import render
 
+from schedule.admin import TeacherSubjectInline
+
 from .calendar import build_week_calendar
 from .forms import TeacherCSVImportForm
 from .importer import CSV_TEMPLATE, export_teachers_to_csv, import_teachers_from_csv
@@ -34,7 +36,7 @@ class NonTeachingHoursPriorityAdmin(admin.ModelAdmin):
 class TeacherAdmin(admin.ModelAdmin):
     list_display = ["__str__", "grade_level", "active"]
     list_filter = ["grade_level", "active"]
-    inlines = [WeeklyNonTeachingHoursInline]
+    inlines = [WeeklyNonTeachingHoursInline, TeacherSubjectInline]
     change_list_template = "teachers/admin/teacher_change_list.html"
 
     def get_urls(self):
