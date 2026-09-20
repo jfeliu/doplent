@@ -1,16 +1,14 @@
-from django.contrib.auth.decorators import login_required
-from django.core.exceptions import PermissionDenied
 from django.shortcuts import get_object_or_404, redirect, render
+
+from schools.decorators import school_staff_required
 
 from .forms import NonTeachingHoursFormSet
 from .models import Teacher
 
 
-@login_required
+@school_staff_required
 def edit_schedule(request):
-    if not request.user.is_staff:
-        raise PermissionDenied
-    teacher = get_object_or_404(Teacher, user=request.user)
+    teacher = get_object_or_404(Teacher, user=request.user, school=request.school)
     queryset = teacher.non_teaching_hours.all()
 
     if request.method == "POST":

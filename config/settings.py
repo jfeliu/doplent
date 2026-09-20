@@ -37,6 +37,13 @@ ALLOWED_HOSTS = os.environ.get(
     '192.168.18.35,192.168.18.29,localhost,127.0.0.1',
 ).split(',')
 
+# The domain each School is served under - the school itself at this exact
+# domain, every other school at "<subdomain>.<BASE_DOMAIN>" (see
+# schools.middleware.CurrentSchoolMiddleware). In production this needs a
+# wildcard DNS record and TLS cert for "*.<BASE_DOMAIN>" in addition to the
+# existing one for the bare domain.
+BASE_DOMAIN = os.environ.get('DJANGO_BASE_DOMAIN', 'doplent.feliuet.com')
+
 CSRF_TRUSTED_ORIGINS = [
     origin for origin in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', '').split(',') if origin
 ]
@@ -65,6 +72,7 @@ INSTALLED_APPS = [
     'django.contrib.sessions',
     'django.contrib.messages',
     'django.contrib.staticfiles',
+    'schools',
     'teachers',
     'schedule',
     'substitutions',
@@ -75,6 +83,7 @@ MIDDLEWARE = [
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'config.middleware.DefaultToCatalanLocaleMiddleware',
+    'schools.middleware.CurrentSchoolMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -94,6 +103,7 @@ TEMPLATES = [
                 'django.template.context_processors.request',
                 'django.contrib.auth.context_processors.auth',
                 'django.contrib.messages.context_processors.messages',
+                'schools.context_processors.current_school',
             ],
         },
     },

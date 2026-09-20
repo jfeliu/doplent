@@ -3,13 +3,13 @@ from datetime import time
 from urllib.parse import urlencode
 
 from django.contrib import messages
-from django.contrib.admin.views.decorators import staff_member_required
 from django.core.exceptions import ValidationError
 from django.db import transaction
 from django.shortcuts import get_object_or_404, redirect, render
 from django.urls import reverse
 from django.utils.translation import gettext as _
 
+from schools.decorators import school_staff_required
 from teachers.models import Teacher
 
 from .calendar import build_teacher_week
@@ -26,48 +26,48 @@ from .services import (
 )
 
 
-@staff_member_required
+@school_staff_required
 def group_list(request):
-    groups = ClassGroup.objects.prefetch_related("tutors__user")
+    groups = ClassGroup.objects.for_school(request.school).prefetch_related("tutors__user")
     return render(request, "schedule/group_list.html", {"groups": groups})
 
 
-@staff_member_required
+@school_staff_required
 def teacher_list(request):
-    teachers = Teacher.objects.filter(active=True).select_related("user")
+    teachers = Teacher.objects.filter(active=True, school=request.school).select_related("user")
     return render(request, "schedule/teacher_list.html", {"teachers": teachers})
 
 
-@staff_member_required
+@school_staff_required
 def teacher_calendar(request, teacher_id):
-    teacher = get_object_or_404(Teacher, pk=teacher_id)
+    teacher = get_object_or_404(Teacher, pk=teacher_id, school=request.school)
     context = {
         "teacher": teacher,
         "hours_label": format_hours(hours_by_teacher([teacher.pk]).get(teacher.pk, 0)),
-        "all_groups": ClassGroup.objects.prefetch_related("tutors__user"),
-        "all_teachers": Teacher.objects.filter(active=True).select_related("user"),
-        "teacher_hours_summary": teacher_hours_summary(),
-        "group_hours_summary": group_hours_summary(),
+        "all_groups": ClassGroup.objects.for_school(request.school).prefetch_related("tutors__user"),
+        "all_teachers": Teacher.objects.filter(active=True, school=request.school).select_related("user"),
+        "teacher_hours_summary": teacher_hours_summary(request.school),
+        "group_hours_summary": group_hours_summary(request.school),
         **build_teacher_week(teacher),
     }
     return render(request, "schedule/teacher_calendar.html", context)
 
 
-def _subject_from_post(value) -> Subject | None:
+def _subject_from_post(value, school) -> Subject | None:
     """The Subject for a posted id, or None - a plain `.filter(pk=value)`
     raises an uncaught ValueError (not a ValidationError) when `value` isn't
     numeric, since that's how the database backend rejects a bad pk lookup."""
     try:
-        return Subject.objects.filter(pk=value).first()
+        return Subject.objects.filter(pk=value, school=school).first()
     except (ValueError, TypeError):
         return None
 
 
-def _teacher_from_post(value) -> Teacher | None:
+def _teacher_from_post(value, school) -> Teacher | None:
     """The active Teacher for a posted id, or None - see _subject_from_post
     for why this can't just be `Teacher.objects.filter(pk=value).first()`."""
     try:
-        return Teacher.objects.filter(pk=value, active=True).first()
+        return Teacher.objects.filter(pk=value, active=True, school=school).first()
     except (ValueError, TypeError):
         return None
 
@@ -95,7 +95,9 @@ def _co_teacher_ids(request) -> list[int]:
             raw_ids.append(int(value))
         except (TypeError, ValueError):
             continue
-    active_ids = set(Teacher.objects.filter(pk__in=raw_ids, active=True).values_list("pk", flat=True))
+    active_ids = set(
+        Teacher.objects.filter(pk__in=raw_ids, active=True, school=request.school).values_list("pk", flat=True)
+    )
     seen: list[int] = []
     for teacher_id in raw_ids:
         if teacher_id in active_ids and teacher_id not in seen:
@@ -103,15 +105,15 @@ def _co_teacher_ids(request) -> list[int]:
     return seen
 
 
-@staff_member_required
+@school_staff_required
 def group_schedule(request, group_id):
-    class_group = get_object_or_404(ClassGroup, pk=group_id)
-    subjects = list(Subject.objects.all())
+    class_group = get_object_or_404(ClassGroup, pk=group_id, school=request.school)
+    subjects = list(Subject.objects.for_school(request.school))
     teacher_options = teacher_options_for(class_group)
 
     if request.method == "POST":
-        subject = _subject_from_post(request.POST.get("subject"))
-        teacher = _teacher_from_post(request.POST.get("teacher"))
+        subject = _subject_from_post(request.POST.get("subject"), request.school)
+        teacher = _teacher_from_post(request.POST.get("teacher"), request.school)
         co_teacher_ids = _co_teacher_ids(request)
         if subject is not None and teacher is not None:
             _assign_selected_cells(request, class_group, subject, teacher, co_teacher_ids)
@@ -120,7 +122,7 @@ def group_schedule(request, group_id):
         )
 
     selected_teacher_id = _int_or_none(request.GET.get("teacher"))
-    selected_co_teachers = _teachers_in_order(_int_list(request.GET.getlist("co_teacher")))
+    selected_co_teachers = _teachers_in_order(_int_list(request.GET.getlist("co_teacher")), request.school)
     context = {
         "class_group": class_group,
         "subjects": subjects,
@@ -128,10 +130,10 @@ def group_schedule(request, group_id):
         "selected_subject_id": _int_or_none(request.GET.get("subject")),
         "selected_teacher_id": selected_teacher_id,
         "selected_co_teachers": selected_co_teachers,
-        "all_groups": ClassGroup.objects.prefetch_related("tutors__user"),
-        "all_teachers": Teacher.objects.filter(active=True).select_related("user"),
-        "teacher_hours_summary": teacher_hours_summary(),
-        "group_hours_summary": group_hours_summary(),
+        "all_groups": ClassGroup.objects.for_school(request.school).prefetch_related("tutors__user"),
+        "all_teachers": Teacher.objects.filter(active=True, school=request.school).select_related("user"),
+        "teacher_hours_summary": teacher_hours_summary(request.school),
+        "group_hours_summary": group_hours_summary(request.school),
         **build_group_grid(class_group),
     }
     return render(request, "schedule/group_schedule.html", context)
@@ -153,11 +155,13 @@ def _int_list(values) -> list[int]:
     return result
 
 
-def _teachers_in_order(teacher_ids: list[int]) -> list[Teacher]:
+def _teachers_in_order(teacher_ids: list[int], school) -> list[Teacher]:
     """The Teacher rows for `teacher_ids`, in that same order - a plain
     `filter(pk__in=...)` would reorder them by the model's default ordering
     instead of preserving the order the user picked them in."""
-    by_id = {t.pk: t for t in Teacher.objects.filter(pk__in=teacher_ids).select_related("user")}
+    by_id = {
+        t.pk: t for t in Teacher.objects.filter(pk__in=teacher_ids, school=school).select_related("user")
+    }
     return [by_id[i] for i in teacher_ids if i in by_id]
 
 
@@ -224,18 +228,18 @@ def _selected_slots_by_entry(request) -> dict[int, set[time]]:
     return by_entry
 
 
-@staff_member_required
+@school_staff_required
 def edit_selected(request, group_id):
     """Edit exactly the grid slots checked for one or more existing entries:
     each affected entry is split into what's kept (unchanged, under its
     original subject/teacher) and what's selected (re-created under the
     subject/teacher/co-teacher picked above the grid)."""
-    class_group = get_object_or_404(ClassGroup, pk=group_id)
+    class_group = get_object_or_404(ClassGroup, pk=group_id, school=request.school)
     if request.method != "POST":
         return redirect("group_schedule", group_id=group_id)
 
-    subject = _subject_from_post(request.POST.get("subject"))
-    teacher = _teacher_from_post(request.POST.get("teacher"))
+    subject = _subject_from_post(request.POST.get("subject"), request.school)
+    teacher = _teacher_from_post(request.POST.get("teacher"), request.school)
     co_teacher_ids = _co_teacher_ids(request)
     by_entry = _selected_slots_by_entry(request)
 
@@ -283,11 +287,11 @@ def edit_selected(request, group_id):
     )
 
 
-@staff_member_required
+@school_staff_required
 def delete_selected(request, group_id):
     """Remove exactly the grid slots checked for one or more existing
     entries - the rest of each entry's span (if any) is kept untouched."""
-    class_group = get_object_or_404(ClassGroup, pk=group_id)
+    class_group = get_object_or_404(ClassGroup, pk=group_id, school=request.school)
     picked_subject_id = _int_or_none(request.POST.get("subject"))
     picked_teacher_id = _int_or_none(request.POST.get("teacher"))
     if request.method == "POST":
@@ -312,24 +316,28 @@ def delete_selected(request, group_id):
     return _redirect_keeping_selection(group_id, picked_subject_id, picked_teacher_id, _co_teacher_ids(request))
 
 
-@staff_member_required
+@school_staff_required
 def delete_entry(request, group_id, entry_id):
-    entry = get_object_or_404(ScheduleEntry, pk=entry_id, class_group_id=group_id)
+    entry = get_object_or_404(
+        ScheduleEntry, pk=entry_id, class_group_id=group_id, class_group__school=request.school
+    )
     if request.method == "POST":
         entry.delete()
         messages.info(request, _("Removed from the timetable."))
     return redirect("group_schedule", group_id=group_id)
 
 
-@staff_member_required
+@school_staff_required
 def edit_entry(request, group_id, entry_id):
-    entry = get_object_or_404(ScheduleEntry, pk=entry_id, class_group_id=group_id)
-    subjects = list(Subject.objects.all())
+    entry = get_object_or_404(
+        ScheduleEntry, pk=entry_id, class_group_id=group_id, class_group__school=request.school
+    )
+    subjects = list(Subject.objects.for_school(request.school))
     teacher_options = teacher_options_for(entry.class_group)
 
     if request.method == "POST":
-        subject = _subject_from_post(request.POST.get("subject"))
-        teacher = _teacher_from_post(request.POST.get("teacher"))
+        subject = _subject_from_post(request.POST.get("subject"), request.school)
+        teacher = _teacher_from_post(request.POST.get("teacher"), request.school)
         co_teacher_ids = _co_teacher_ids(request)
         if subject is not None and teacher is not None:
             entry.subject = subject

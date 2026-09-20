@@ -6,6 +6,7 @@ from django.urls import reverse
 from django.utils.html import format_html, format_html_join
 from django.utils.translation import gettext_lazy as _
 
+from schools.admin import SchoolScopedAdminMixin
 from teachers.models import Teacher
 
 from .models import MAX_TUTORS, ClassGroup, ScheduleEntry, Subject, TeacherSubject
@@ -90,7 +91,7 @@ class ScheduleEntryInlineForm(forms.ModelForm):
             self.add_error("co_teachers", exc.messages)
 
 
-class ScheduleEntryInline(admin.TabularInline):
+class ScheduleEntryInline(SchoolScopedAdminMixin, admin.TabularInline):
     model = ScheduleEntry
     form = ScheduleEntryInlineForm
     fk_name = "class_group"
@@ -98,15 +99,26 @@ class ScheduleEntryInline(admin.TabularInline):
     filter_horizontal = ["co_teachers"]
     extra = 2
 
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name in ("subject", "teacher"):
+            model = Subject if db_field.name == "subject" else Teacher
+            kwargs["queryset"] = self.scope_to_school(model.objects.all(), request)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def formfield_for_manytomany(self, db_field, request, **kwargs):
+        if db_field.name == "co_teachers":
+            kwargs["queryset"] = self.scope_to_school(Teacher.objects.all(), request)
+        return super().formfield_for_manytomany(db_field, request, **kwargs)
+
 
 @admin.register(Subject)
-class SubjectAdmin(admin.ModelAdmin):
+class SubjectAdmin(SchoolScopedAdminMixin, admin.ModelAdmin):
     list_display = ["name"]
     search_fields = ["name"]
 
 
 @admin.register(ClassGroup)
-class ClassGroupAdmin(admin.ModelAdmin):
+class ClassGroupAdmin(SchoolScopedAdminMixin, admin.ModelAdmin):
     list_display = ["name", "grade_level", "tutors_label", "schedule_link"]
     list_filter = ["grade_level"]
     fields = ["name", "grade_level", "tutor_count", "tutors"]
@@ -125,9 +137,9 @@ class ClassGroupAdmin(admin.ModelAdmin):
             # reason would silently drop them (no matching <option> means the
             # browser submits nothing for their slot). Active teachers still
             # sort first, and inactive ones are labelled, for convenience.
-            kwargs["queryset"] = Teacher.objects.select_related("user").order_by(
-                "-active", "user__last_name", "user__first_name"
-            )
+            kwargs["queryset"] = self.scope_to_school(Teacher.objects.all(), request).select_related(
+                "user"
+            ).order_by("-active", "user__last_name", "user__first_name")
             kwargs["widget"] = TutorSlotsWidget()
         field = super().formfield_for_manytomany(db_field, request, **kwargs)
         if db_field.name == "tutors":
@@ -145,9 +157,14 @@ class ClassGroupAdmin(admin.ModelAdmin):
         return format_html('<a href="{}">{}</a>', reverse("group_schedule", args=[obj.pk]), _("View / edit"))
 
 
-class TeacherSubjectInline(admin.TabularInline):
+class TeacherSubjectInline(SchoolScopedAdminMixin, admin.TabularInline):
     """Registered onto TeacherAdmin from teachers/admin.py - not here, to keep
     that admin page's layout in one place."""
 
     model = TeacherSubject
     extra = 1
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        if db_field.name == "subject":
+            kwargs["queryset"] = self.scope_to_school(Subject.objects.all(), request)
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)

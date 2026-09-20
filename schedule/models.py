@@ -3,6 +3,8 @@ from django.core.validators import MaxValueValidator, MinValueValidator
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+from schools.managers import SchoolScopedManager
+from schools.models import School, get_default_school_id
 from teachers.models import Teacher, WeeklyNonTeachingHours
 
 # The most tutor/co-teacher dropdowns the UI ever shows at once, for a single
@@ -13,12 +15,24 @@ MAX_CO_TEACHERS = 6
 
 
 class Subject(models.Model):
-    name = models.CharField(max_length=100, unique=True, verbose_name=_("name"))
+    school = models.ForeignKey(
+        School,
+        on_delete=models.PROTECT,
+        related_name="subjects",
+        default=get_default_school_id,
+        verbose_name=_("school"),
+    )
+    name = models.CharField(max_length=100, verbose_name=_("name"))
+
+    objects = SchoolScopedManager()
 
     class Meta:
         ordering = ["name"]
         verbose_name = _("subject")
         verbose_name_plural = _("subjects")
+        constraints = [
+            models.UniqueConstraint(fields=["school", "name"], name="unique_subject_name_per_school"),
+        ]
 
     def __str__(self):
         return self.name
@@ -29,6 +43,13 @@ class ClassGroup(models.Model):
     year - see substitutions.services.course_year_start for that other,
     unrelated sense of "course" already used elsewhere in this codebase."""
 
+    school = models.ForeignKey(
+        School,
+        on_delete=models.PROTECT,
+        related_name="class_groups",
+        default=get_default_school_id,
+        verbose_name=_("school"),
+    )
     name = models.CharField(max_length=100, verbose_name=_("name"))
     grade_level = models.CharField(
         max_length=20, choices=Teacher.GradeLevel.choices, verbose_name=_("grade level")
@@ -47,6 +68,8 @@ class ClassGroup(models.Model):
         help_text=_("The homeroom teacher(s), who usually teach most of this group's subjects."),
     )
 
+    objects = SchoolScopedManager()
+
     class Meta:
         ordering = ["name"]
         verbose_name = _("class group")
@@ -63,6 +86,8 @@ class TeacherSubject(models.Model):
 
     teacher = models.ForeignKey(Teacher, on_delete=models.CASCADE, related_name="subjects_taught")
     subject = models.ForeignKey(Subject, on_delete=models.CASCADE, related_name="qualified_teachers")
+
+    objects = SchoolScopedManager(school_field="teacher__school")
 
     class Meta:
         ordering = ["subject__name"]
@@ -104,6 +129,8 @@ class ScheduleEntry(models.Model):
     start_time = models.TimeField(verbose_name=_("start time"))
     end_time = models.TimeField(verbose_name=_("end time"))
 
+    objects = SchoolScopedManager(school_field="teacher__school")
+
     class Meta:
         ordering = ["weekday", "start_time"]
         verbose_name = _("schedule entry")
@@ -143,8 +170,14 @@ class ScheduleEntry(models.Model):
             raise ValidationError({"teacher": _conflict_message(self.teacher, conflict)})
 
     def _overlapping_entries(self):
+        # Scoped to this entry's own school - two different schools' teachers
+        # never conflict with each other, even if their timetables happen to
+        # share a weekday/time.
         return ScheduleEntry.objects.filter(
-            weekday=self.weekday, start_time__lt=self.end_time, end_time__gt=self.start_time
+            weekday=self.weekday,
+            start_time__lt=self.end_time,
+            end_time__gt=self.start_time,
+            class_group__school_id=self.class_group.school_id,
         ).exclude(pk=self.pk)
 
     def validate_co_teachers(self, co_teacher_ids: list[int]) -> None:
@@ -184,8 +217,11 @@ def _teaching_conflict(overlapping, teacher_id, weekday, start_time, end_time):
     over [start_time, end_time) on `weekday`, if any - they're already
     teaching (as the main teacher or a co-teacher) elsewhere, or marked
     non-teaching then. `overlapping` is the caller's own-entry-excluded
-    ScheduleEntry queryset for that slot, reused across every participant
-    checked for one entry."""
+    ScheduleEntry queryset for that slot (already scoped to one school),
+    reused across every participant checked for one entry. The
+    WeeklyNonTeachingHours half of the check needs no separate school
+    filter - `teacher_id` alone already pins it to one teacher, and so to one
+    school."""
     busy = overlapping.filter(models.Q(teacher_id=teacher_id) | models.Q(co_teachers=teacher_id)).first()
     if busy is not None:
         return busy

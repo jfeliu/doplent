@@ -1,10 +1,11 @@
 {% load i18n static %}
+{% translate "Doplent" as default_brand_name %}
 <!doctype html>
 <html lang="{{ LANGUAGE_CODE }}">
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}{% translate "Doplent" %}{% endblock %}</title>
+  <title>{% block title %}{{ school.name|default:default_brand_name }}{% endblock %}</title>
 
   <!-- PWA: installable on Android (manifest) and iOS (apple-* meta tags) -->
   <link rel="manifest" href="{% static 'manifest.webmanifest' %}">
@@ -13,7 +14,7 @@
   <link rel="apple-touch-icon" href="{% static 'icons/apple-touch-icon.png' %}">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="{% translate "Doplent" %}">
+  <meta name="apple-mobile-web-app-title" content="{{ school.name|default:default_brand_name }}">
 
   <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/js/bootstrap.bundle.min.js" defer></script>
@@ -169,7 +170,7 @@
       <a class="navbar-brand" href="{% url 'dashboard' %}">
         <i class="bi bi-calendar2-check"></i>
         <span class="brand-text">
-          <span>{% translate "Doplent" %}</span>
+          <span>{{ school.name|default:default_brand_name }}</span>
           <span class="brand-tagline">{% translate "Find a sub before the bell" %}</span>
         </span>
       </a>
@@ -181,9 +182,11 @@
         <div class="navbar-nav ms-auto flex-column flex-lg-row gap-1 align-items-stretch align-items-lg-center">
           <a class="nav-link" href="{% url 'dashboard' %}"><i class="bi bi-grid"></i>{% translate "Dashboard" %}</a>
           <a class="nav-link" href="{% url 'report_absence' %}"><i class="bi bi-calendar-plus"></i>{% translate "Report absence" %}</a>
-          {% if user.is_staff %}
+          {% if user.teacher.role == "staff" or user.is_superuser %}
           <a class="nav-link" href="{% url 'edit_schedule' %}"><i class="bi bi-clock"></i>{% translate "My schedule" %}</a>
           <a class="nav-link" href="{% url 'group_list' %}"><i class="bi bi-calendar-week"></i>{% translate "Class groups" %}</a>
+          {% endif %}
+          {% if user.is_staff %}
           <a class="nav-link" href="{% url 'admin:index' %}"><i class="bi bi-shield-lock"></i>{% translate "Admin" %}</a>
           {% endif %}
           <form method="post" action="{% url 'logout' %}" class="d-inline">

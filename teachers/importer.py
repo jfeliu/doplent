@@ -9,6 +9,8 @@ from django.contrib.auth.models import User
 from django.db import transaction
 from django.utils.translation import gettext_lazy as _
 
+from schools.models import get_default_school
+
 from .models import NonTeachingHoursKind, Teacher, WeeklyNonTeachingHours
 
 REQUIRED_COLUMNS = {"first_name", "last_name", "grade_level"}
@@ -151,7 +153,7 @@ def _normalize_name(name: str) -> str:
     return " ".join(name.split()).casefold()
 
 
-def _process_row(row: dict, result: ImportResult, line_number: int) -> _BlockSpec | None:
+def _process_row(row: dict, result: ImportResult, line_number: int, school) -> _BlockSpec | None:
     first_name = (row.get("first_name") or "").strip()
     last_name = (row.get("last_name") or "").strip()
     email = (row.get("email") or "").strip()
@@ -183,7 +185,15 @@ def _process_row(row: dict, result: ImportResult, line_number: int) -> _BlockSpe
 
     teacher = Teacher.objects.filter(user=user).first()
     if teacher is None:
-        teacher = Teacher.objects.create(user=user, grade_level=grade_raw)
+        teacher = Teacher.objects.create(user=user, grade_level=grade_raw, school=school)
+    elif teacher.school_id != school.pk:
+        # Usernames are derived from the name alone and aren't namespaced per
+        # school (see _derive_username) - a same-named teacher already
+        # imported for a different school must not be silently adopted here.
+        raise ValueError(
+            _("%(username)s already exists at a different school - pick a different name or username")
+            % {"username": username}
+        )
     elif teacher.grade_level != grade_raw:
         raise ValueError(
             _("grade_level '%(grade)s' for %(username)s conflicts with existing grade_level '%(existing)s'")
@@ -225,12 +235,14 @@ def _process_row(row: dict, result: ImportResult, line_number: int) -> _BlockSpe
     )
 
 
-def _teacher_name_index() -> dict:
-    """`normalized "First Last" -> Teacher` for every teacher, with `_AMBIGUOUS`
-    stored where two teachers share a name. Built after all rows are processed,
-    so it also covers teachers created earlier in the same import."""
+def _teacher_name_index(school) -> dict:
+    """`normalized "First Last" -> Teacher` for every teacher at `school`,
+    with `_AMBIGUOUS` stored where two teachers share a name. Built after all
+    rows are processed, so it also covers teachers created earlier in the
+    same import. Scoped to `school` so a co_teaching head can't accidentally
+    resolve to a same-named teacher at a different school."""
     index: dict = {}
-    for teacher in Teacher.objects.select_related("user"):
+    for teacher in Teacher.objects.filter(school=school).select_related("user"):
         key = _normalize_name(f"{teacher.user.first_name} {teacher.user.last_name}")
         index[key] = _AMBIGUOUS if key in index else teacher
     return index
@@ -260,10 +272,10 @@ def _resolve_head(spec: _BlockSpec, name_index: dict, result: ImportResult) -> T
     return match
 
 
-def _apply_blocks(specs: list[_BlockSpec], result: ImportResult) -> None:
+def _apply_blocks(specs: list[_BlockSpec], result: ImportResult, school) -> None:
     """Create (or reconcile) every parsed block now that all teachers exist,
     resolving each co_teaching block's head against the full roster."""
-    name_index = _teacher_name_index()
+    name_index = _teacher_name_index(school)
     for spec in specs:
         head = None
         if spec.kind == NonTeachingHoursKind.CO_TEACHING:
@@ -311,7 +323,7 @@ def _decode(raw: bytes) -> str | None:
     return None
 
 
-def import_teachers_from_csv(uploaded_file) -> ImportResult:
+def import_teachers_from_csv(uploaded_file, school=None) -> ImportResult:
     """Parse an uploaded CSV of teachers and their weekly non-teaching hours,
     creating User/Teacher/WeeklyNonTeachingHours records. One row per
     non-teaching block; repeat a teacher's first_name/last_name across rows to
@@ -323,6 +335,7 @@ def import_teachers_from_csv(uploaded_file) -> ImportResult:
     a "co_teaching head" (a teacher's "First Last", resolved against the whole
     roster including teachers added later in the same file). If any row fails
     validation, nothing is saved."""
+    school = school or get_default_school()
     result = ImportResult()
     content = _decode(uploaded_file.read())
     if content is None:
@@ -342,7 +355,7 @@ def import_teachers_from_csv(uploaded_file) -> ImportResult:
             if not any((value or "").strip() for value in row.values()):
                 continue
             try:
-                spec = _process_row(row, result, line_number)
+                spec = _process_row(row, result, line_number, school)
             except ValueError as exc:
                 result.errors.append(RowError(line_number, str(exc)))
                 continue
@@ -350,7 +363,7 @@ def import_teachers_from_csv(uploaded_file) -> ImportResult:
                 specs.append(spec)
 
         if not result.errors:
-            _apply_blocks(specs, result)
+            _apply_blocks(specs, result, school)
 
         if result.errors:
             transaction.set_rollback(True)
@@ -358,17 +371,19 @@ def import_teachers_from_csv(uploaded_file) -> ImportResult:
     return result
 
 
-def export_teachers_to_csv() -> str:
-    """Serialize every active teacher and their weekly non-teaching hours as a
-    CSV string in the same format import_teachers_from_csv accepts, so the
-    current calendar can be downloaded, edited and re-uploaded without loss.
-    One row per non-teaching block; a teacher with no hours yet gets a single
-    row with the weekday/time columns left blank. Weekdays are written in
-    English and types as their stored codes, both of which the importer
-    understands regardless of the active language. Co-teaching blocks carry
-    their head teacher's "First Last" name in the co_teaching head column."""
+def export_teachers_to_csv(school=None) -> str:
+    """Serialize every active teacher at `school` and their weekly
+    non-teaching hours as a CSV string in the same format
+    import_teachers_from_csv accepts, so the current calendar can be
+    downloaded, edited and re-uploaded without loss. One row per
+    non-teaching block; a teacher with no hours yet gets a single row with
+    the weekday/time columns left blank. Weekdays are written in English and
+    types as their stored codes, both of which the importer understands
+    regardless of the active language. Co-teaching blocks carry their head
+    teacher's "First Last" name in the co_teaching head column."""
+    school = school or get_default_school()
     teachers = (
-        Teacher.objects.filter(active=True)
+        Teacher.objects.filter(active=True, school=school)
         .select_related("user")
         .prefetch_related("non_teaching_hours__head__user")
         .order_by("user__last_name", "user__first_name")

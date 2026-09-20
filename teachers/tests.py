@@ -571,8 +571,8 @@ class EditScheduleAccessTests(TestCase):
 
     def test_staff_teacher_can_open_the_editor(self):
         teacher = make_teacher("Boss", "User")
-        teacher.user.is_staff = True
-        teacher.user.save()
+        teacher.role = Teacher.Role.STAFF
+        teacher.save()
         self.client.force_login(teacher.user)
 
         self.assertEqual(self.client.get(reverse("edit_schedule")).status_code, 200)

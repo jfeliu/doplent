@@ -16,11 +16,11 @@ class NonTeachingHoursForm(forms.ModelForm):
     def __init__(self, *args, owner=None, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["head"].label = _("Co-teaching head")
-        # Only active teachers can lead a class, and never the owner of the row
-        # (a teacher can't be their own co-teaching head).
+        # Only active teachers at the same school can lead a class, and never
+        # the owner of the row (a teacher can't be their own co-teaching head).
         head_qs = Teacher.objects.filter(active=True).select_related("user")
         if owner is not None:
-            head_qs = head_qs.exclude(pk=owner.pk)
+            head_qs = head_qs.filter(school=owner.school).exclude(pk=owner.pk)
         self.fields["head"].queryset = head_qs
 
     def clean(self):

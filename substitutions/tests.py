@@ -338,7 +338,7 @@ class FindAvailableSubstitutesTests(TestCase):
 
     def test_priorities_are_seeded_by_migration(self):
         self.assertEqual(
-            NonTeachingHoursPriority.ordering_map(),
+            NonTeachingHoursPriority.ordering_map(self.absent.school),
             {"free": 0, "paperwork": 10, "co_teaching": 20, "escoltam": 30, "poesia": 40, "cicle": 50},
         )
 
@@ -1500,7 +1500,7 @@ class StatsDashboardTests(TestCase):
         make_substitution(last_year, self.sub)
 
     def test_build_admin_stats_numbers(self):
-        stats = build_admin_stats()
+        stats = build_admin_stats(self.absent.school)
 
         # Only this year's two absences / one substitution count - last year's
         # 3-hour substitution is excluded.

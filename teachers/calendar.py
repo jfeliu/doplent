@@ -3,6 +3,8 @@ as a week-calendar grid (CSS-positioned blocks, like a typical calendar UI)."""
 from dataclasses import dataclass
 from datetime import time
 
+from schools.models import get_default_school
+
 from .models import NonTeachingHoursKind, WeeklyNonTeachingHours
 
 PALETTE = [
@@ -61,9 +63,10 @@ def _assign_colors(entries) -> tuple[dict[int, str], list[dict]]:
     return colors, legend
 
 
-def build_week_calendar():
+def build_week_calendar(school=None):
+    school = school or get_default_school()
     entries = list(
-        WeeklyNonTeachingHours.objects.filter(teacher__active=True)
+        WeeklyNonTeachingHours.objects.filter(teacher__active=True, teacher__school=school)
         .select_related("teacher__user")
         .order_by("weekday", "start_time")
     )

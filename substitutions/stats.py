@@ -27,24 +27,24 @@ def _pct(part: int, whole: int) -> int:
     return round(100 * part / whole) if whole else 0
 
 
-def build_admin_stats(since=None) -> dict:
-    """Everything the stats dashboard template needs, counted from `since`
-    (default: the start of the current course year)."""
+def build_admin_stats(school, since=None) -> dict:
+    """Everything the stats dashboard template needs for `school`, counted
+    from `since` (default: the start of `school`'s current course year)."""
     now = timezone.now()
-    since = since or course_year_start()
+    since = since or course_year_start(school=school)
 
     absences = list(
-        Absence.objects.filter(start_datetime__gte=since)
+        Absence.objects.filter(start_datetime__gte=since, teacher__school=school)
         .select_related("teacher__user")
         .prefetch_related("substitutions", "teacher__non_teaching_hours")
     )
     fully_covered = sum(1 for absence in absences if not uncovered_ranges(absence))
 
-    subs = Substitution.objects.filter(start_datetime__gte=since).aggregate(
+    subs = Substitution.objects.filter(start_datetime__gte=since, absence__teacher__school=school).aggregate(
         n=Count("id"), span=Coalesce(Sum(_SPAN), timedelta(), output_field=DurationField())
     )
 
-    offers = SubstitutionOffer.objects.filter(start_datetime__gte=since)
+    offers = SubstitutionOffer.objects.filter(start_datetime__gte=since, absence__teacher__school=school)
     offers_total = offers.count()
     by_status = {row["status"]: row["n"] for row in offers.values("status").annotate(n=Count("id"))}
     status_rows = [
@@ -78,7 +78,7 @@ def build_admin_stats(since=None) -> dict:
     absence_reason_labels = dict(Absence.Reason.choices)
     absence_reasons = [
         {"label": absence_reason_labels.get(row["reason"], row["reason"] or _("Unspecified")), "count": row["n"]}
-        for row in Absence.objects.filter(start_datetime__gte=since)
+        for row in Absence.objects.filter(start_datetime__gte=since, teacher__school=school)
         .values("reason")
         .annotate(n=Count("id"))
         .order_by("-n")
@@ -87,7 +87,7 @@ def build_admin_stats(since=None) -> dict:
     since_sub = Q(substitutions_done__start_datetime__gte=since)
     top_substitutes = [
         {"teacher": teacher, "count": teacher.subs_n, "time": format_duration(teacher.subs_span)}
-        for teacher in Teacher.objects.select_related("user")
+        for teacher in Teacher.objects.filter(school=school).select_related("user")
         .annotate(
             subs_n=Count("substitutions_done", filter=since_sub),
             subs_span=Coalesce(Sum(_SUB_SPAN, filter=since_sub), timedelta(), output_field=DurationField()),
@@ -97,7 +97,7 @@ def build_admin_stats(since=None) -> dict:
     ]
     busiest_absentees = [
         {"teacher": teacher, "count": teacher.abs_n}
-        for teacher in Teacher.objects.select_related("user")
+        for teacher in Teacher.objects.filter(school=school).select_related("user")
         .annotate(abs_n=Count("absences", filter=Q(absences__start_datetime__gte=since)))
         .filter(abs_n__gt=0)
         .order_by("-abs_n", "user__last_name")[:10]
@@ -107,7 +107,7 @@ def build_admin_stats(since=None) -> dict:
         "generated_at": now,
         "course_start": since,
         "totals": {
-            "active_teachers": Teacher.objects.filter(active=True).count(),
+            "active_teachers": Teacher.objects.filter(active=True, school=school).count(),
             "absences": len(absences),
             "substitutions": subs["n"],
             "hours_covered": format_duration(subs["span"]),

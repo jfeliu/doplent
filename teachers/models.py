@@ -3,13 +3,34 @@ from django.core.exceptions import ValidationError
 from django.db import models
 from django.utils.translation import gettext_lazy as _
 
+from schools.managers import SchoolScopedManager
+from schools.models import School, get_default_school_id
+
 
 class Teacher(models.Model):
     class GradeLevel(models.TextChoices):
         PRIMARY = "primary", _("Primary")
         PRE_PRIMARY = "pre_primary", _("Pre-primary")
 
+    class Role(models.TextChoices):
+        STAFF = "staff", _("Staff")
+        MEMBER = "member", _("Member")
+
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name="teacher")
+    school = models.ForeignKey(
+        School,
+        on_delete=models.PROTECT,
+        related_name="teachers",
+        default=get_default_school_id,
+        verbose_name=_("school"),
+    )
+    role = models.CharField(
+        max_length=10,
+        choices=Role.choices,
+        default=Role.MEMBER,
+        verbose_name=_("role"),
+        help_text=_("Staff can manage this school's roster and timetable."),
+    )
     grade_level = models.CharField(max_length=20, choices=GradeLevel.choices, verbose_name=_("grade level"))
     active = models.BooleanField(default=True, verbose_name=_("active"))
     calendar_url = models.URLField(
@@ -17,6 +38,8 @@ class Teacher(models.Model):
         verbose_name=_("calendar link"),
         help_text=_("Link to this teacher's calendar. Shown when relevant if set."),
     )
+
+    objects = SchoolScopedManager()
 
     class Meta:
         ordering = ["user__last_name", "user__first_name"]
@@ -40,32 +63,58 @@ class NonTeachingHoursKind(models.TextChoices):
     CICLE = "cicle", "Cicle"
 
 
+# The default ordering a newly created School's NonTeachingHoursPriority rows
+# are seeded with - see schools.admin.SchoolAdmin, and teachers/migrations/
+# 0004_non_teaching_hours_kind.py + 0007_add_poesia_and_cicle_non_teaching_kinds.py
+# for how the one pre-existing school got these same values.
+DEFAULT_NON_TEACHING_HOURS_PRIORITIES = [
+    (NonTeachingHoursKind.FREE, 0),
+    (NonTeachingHoursKind.PAPERWORK, 10),
+    (NonTeachingHoursKind.CO_TEACHING, 20),
+    (NonTeachingHoursKind.ESCOLTAM, 30),
+    (NonTeachingHoursKind.POESIA, 40),
+    (NonTeachingHoursKind.CICLE, 50),
+]
+
+
 class NonTeachingHoursPriority(models.Model):
     """How eagerly the substitute-picker pulls a teacher off each kind of
     non-teaching block. Lower `priority` is drawn from first (free time), higher
-    is a last resort (escolta'm). One row per kind, seeded by migration and
-    editable in the admin so the order can be retuned without a deploy."""
+    is a last resort (escolta'm). One row per kind per school, seeded when the
+    school is created and editable in the admin so the order can be retuned
+    without a deploy."""
 
-    kind = models.CharField(
-        max_length=20, choices=NonTeachingHoursKind.choices, unique=True, verbose_name=_("kind")
+    school = models.ForeignKey(
+        School,
+        on_delete=models.CASCADE,
+        related_name="non_teaching_hours_priorities",
+        default=get_default_school_id,
+        verbose_name=_("school"),
     )
+    kind = models.CharField(max_length=20, choices=NonTeachingHoursKind.choices, verbose_name=_("kind"))
     priority = models.PositiveIntegerField(
         verbose_name=_("priority"), help_text=_("Lower is pulled first.")
     )
+
+    objects = SchoolScopedManager()
 
     class Meta:
         ordering = ["priority"]
         verbose_name = _("non-teaching hours priority")
         verbose_name_plural = _("non-teaching hours priorities")
+        constraints = [
+            models.UniqueConstraint(fields=["school", "kind"], name="unique_priority_per_school_kind"),
+        ]
 
     def __str__(self):
         return f"{self.get_kind_display()} ({self.priority})"
 
     @classmethod
-    def ordering_map(cls) -> dict[str, int]:
-        """`kind -> priority` for every kind. Any kind without a row falls to the
-        end, so an unconfigured kind is treated as the least preferred."""
-        configured = dict(cls.objects.values_list("kind", "priority"))
+    def ordering_map(cls, school) -> dict[str, int]:
+        """`kind -> priority` for every kind, for one school. Any kind without
+        a row falls to the end, so an unconfigured kind is treated as the
+        least preferred."""
+        configured = dict(cls.objects.filter(school=school).values_list("kind", "priority"))
         fallback = max(configured.values(), default=0) + 1
         return {kind: configured.get(kind, fallback) for kind in NonTeachingHoursKind.values}
 
@@ -109,6 +158,8 @@ class WeeklyNonTeachingHours(models.Model):
         verbose_name=_("co-teaching head"),
         help_text=_("The teacher who leads this co-taught class. Required for co-teaching blocks."),
     )
+
+    objects = SchoolScopedManager(school_field="teacher__school")
 
     class Meta:
         ordering = ["weekday", "start_time"]

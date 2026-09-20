@@ -77,15 +77,20 @@ def _entry_minutes(entry) -> int:
     return _minutes(entry.end_time) - _minutes(entry.start_time)
 
 
-def hours_by_teacher(teacher_ids=None) -> dict[int, int]:
+def hours_by_teacher(teacher_ids=None, school=None) -> dict[int, int]:
     """Total minutes each teacher is already scheduled to teach, across every
     class group and whether as the main teacher or a co-teacher - their
-    overall teaching load."""
+    overall teaching load. `school` scopes the "every teacher" case
+    (`teacher_ids=None`) - with explicit `teacher_ids` it's redundant, since
+    those already pin the query to particular (and so particular-school)
+    teachers."""
     entries = ScheduleEntry.objects.all()
     if teacher_ids is not None:
         entries = entries.filter(
             models.Q(teacher_id__in=teacher_ids) | models.Q(co_teachers__in=teacher_ids)
         ).distinct()
+    elif school is not None:
+        entries = entries.filter(teacher__school=school)
     totals: dict[int, int] = defaultdict(int)
     for entry in entries.prefetch_related("co_teachers"):
         minutes = _entry_minutes(entry)
@@ -95,24 +100,29 @@ def hours_by_teacher(teacher_ids=None) -> dict[int, int]:
     return totals
 
 
-def non_teaching_hours_by_teacher(teacher_ids=None) -> dict[int, int]:
+def non_teaching_hours_by_teacher(teacher_ids=None, school=None) -> dict[int, int]:
     """Total minutes each teacher has recorded as recurring non-teaching time
     each week (free, paperwork, co-teaching, escolta'm - see
-    teachers.WeeklyNonTeachingHours)."""
+    teachers.WeeklyNonTeachingHours). See `hours_by_teacher` for `school`."""
     entries = WeeklyNonTeachingHours.objects.all()
     if teacher_ids is not None:
         entries = entries.filter(teacher_id__in=teacher_ids)
+    elif school is not None:
+        entries = entries.filter(teacher__school=school)
     totals: dict[int, int] = defaultdict(int)
     for teacher_id, start_time, end_time in entries.values_list("teacher_id", "start_time", "end_time"):
         totals[teacher_id] += _minutes(end_time) - _minutes(start_time)
     return totals
 
 
-def hours_by_group(group_ids=None) -> dict[int, int]:
-    """Total minutes each class group has scheduled in its own timetable."""
+def hours_by_group(group_ids=None, school=None) -> dict[int, int]:
+    """Total minutes each class group has scheduled in its own timetable.
+    See `hours_by_teacher` for `school`."""
     entries = ScheduleEntry.objects.all()
     if group_ids is not None:
         entries = entries.filter(class_group_id__in=group_ids)
+    elif school is not None:
+        entries = entries.filter(class_group__school=school)
     totals: dict[int, int] = defaultdict(int)
     for group_id, start_time, end_time in entries.values_list("class_group_id", "start_time", "end_time"):
         totals[group_id] += _minutes(end_time) - _minutes(start_time)
@@ -130,10 +140,13 @@ class TeacherHoursSummary:
     non_teaching_label: str
 
 
-def teacher_hours_summary() -> list[TeacherHoursSummary]:
-    teachers = list(Teacher.objects.filter(active=True).select_related("user"))
-    teaching = hours_by_teacher()
-    non_teaching = non_teaching_hours_by_teacher()
+def teacher_hours_summary(school=None) -> list[TeacherHoursSummary]:
+    teachers_qs = Teacher.objects.filter(active=True)
+    if school is not None:
+        teachers_qs = teachers_qs.filter(school=school)
+    teachers = list(teachers_qs.select_related("user"))
+    teaching = hours_by_teacher(school=school)
+    non_teaching = non_teaching_hours_by_teacher(school=school)
     teachers.sort(key=lambda t: str(t).lower())
     return [
         TeacherHoursSummary(
@@ -154,9 +167,12 @@ class GroupHoursSummary:
     hours_label: str
 
 
-def group_hours_summary() -> list[GroupHoursSummary]:
-    groups = list(ClassGroup.objects.all())
-    totals = hours_by_group()
+def group_hours_summary(school=None) -> list[GroupHoursSummary]:
+    groups_qs = ClassGroup.objects.all()
+    if school is not None:
+        groups_qs = groups_qs.filter(school=school)
+    groups = list(groups_qs)
+    totals = hours_by_group(school=school)
     groups.sort(key=lambda g: g.name.lower())
     return [
         GroupHoursSummary(class_group=group, hours_label=format_hours(totals.get(group.pk, 0)))
@@ -176,8 +192,9 @@ class TeacherOption:
 
 
 def teacher_options_for(class_group: ClassGroup) -> list[TeacherOption]:
-    teachers = list(Teacher.objects.filter(active=True).select_related("user"))
-    load = hours_by_teacher()
+    school = class_group.school
+    teachers = list(Teacher.objects.filter(active=True, school=school).select_related("user"))
+    load = hours_by_teacher(school=school)
     tutor_ids = set(class_group.tutors.values_list("pk", flat=True))
     teachers.sort(key=lambda t: (t.pk not in tutor_ids, t.user.last_name, t.user.first_name))
     return [

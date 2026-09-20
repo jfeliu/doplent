@@ -22,11 +22,11 @@ from .services import (
 )
 
 
-def make_teacher(first_name: str, last_name: str, active: bool = True) -> Teacher:
+def make_teacher(first_name: str, last_name: str, active: bool = True, role=Teacher.Role.MEMBER) -> Teacher:
     user = User.objects.create_user(
         username=f"{first_name}.{last_name}".lower(), first_name=first_name, last_name=last_name
     )
-    return Teacher.objects.create(user=user, grade_level=Teacher.GradeLevel.PRIMARY, active=active)
+    return Teacher.objects.create(user=user, grade_level=Teacher.GradeLevel.PRIMARY, active=active, role=role)
 
 
 def make_group(name: str, tutor: Teacher) -> ClassGroup:
@@ -445,7 +445,7 @@ class GroupScheduleViewTests(TestCase):
         self.tutor = make_teacher("Anna", "Tutor")
         self.group = make_group("3r A", tutor=self.tutor)
         self.subject = Subject.objects.create(name="Matemàtiques")
-        self.staff_user = User.objects.create_user(username="coord", password="pw", is_staff=True)
+        self.staff_user = make_teacher("Coord", "Own", role=Teacher.Role.STAFF).user
         self.plain_user = User.objects.create_user(username="teacher", password="pw")
         Teacher.objects.create(user=self.plain_user, grade_level=Teacher.GradeLevel.PRIMARY)
 
@@ -654,7 +654,7 @@ class EditEntryViewTests(TestCase):
             class_group=self.group, subject=self.subject, teacher=self.tutor,
             weekday=0, start_time=t(9), end_time=t(10),
         )
-        self.staff_user = User.objects.create_user(username="coord_edit", password="pw", is_staff=True)
+        self.staff_user = make_teacher("Coord", "Edit", role=Teacher.Role.STAFF).user
 
     def test_requires_staff(self):
         plain_user = User.objects.create_user(username="plain_edit", password="pw")
@@ -742,7 +742,7 @@ class EditSelectedAndDeleteSelectedViewTests(TestCase):
             class_group=self.group, subject=self.subject, teacher=self.tutor,
             weekday=0, start_time=t(9), end_time=t(11),
         )
-        self.staff_user = User.objects.create_user(username="coord_selected", password="pw", is_staff=True)
+        self.staff_user = make_teacher("Coord", "Selected", role=Teacher.Role.STAFF).user
 
     def _occupied_cell(self, weekday, hour, minute=0):
         return f"{weekday}:{hour:02d}:{minute:02d}|{self.entry.pk}"
@@ -878,7 +878,7 @@ class TeacherCalendarViewTests(TestCase):
             class_group=self.group, subject=self.subject, teacher=self.tutor,
             weekday=0, start_time=t(9), end_time=t(10),
         )
-        self.staff_user = User.objects.create_user(username="coord_calendar", password="pw", is_staff=True)
+        self.staff_user = make_teacher("Coord", "Calendar", role=Teacher.Role.STAFF).user
 
     def test_full_calendar_page_shows_teaching_block_and_hours(self):
         self.client.force_login(self.staff_user)
@@ -915,7 +915,7 @@ class GroupListAndTeacherListViewTests(TestCase):
     def setUp(self):
         self.tutor = make_teacher("Anna", "Tutor")
         self.group = make_group("3r A", tutor=self.tutor)
-        self.staff_user = User.objects.create_user(username="coord_lists", password="pw", is_staff=True)
+        self.staff_user = make_teacher("Coord", "Lists", role=Teacher.Role.STAFF).user
 
     def test_group_list_shows_groups_and_links_to_their_timetable(self):
         self.client.force_login(self.staff_user)

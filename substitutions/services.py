@@ -7,6 +7,7 @@ from django.db.models.functions import Coalesce
 from django.utils import timezone
 from django.utils.translation import gettext_lazy as _
 
+from schools.models import School
 from teachers.models import (
     NonTeachingHoursKind,
     NonTeachingHoursPriority,
@@ -26,29 +27,22 @@ SLOT_REASON_LABELS = {
     "co_teaching_head": _("Co-taught class you lead - the co-teacher covers it"),
 }
 
-# The school's daily working hours - substitutes are never searched for
-# outside these windows, regardless of any teacher's individual schedule.
-WORKING_HOURS: list[tuple[time, time]] = [
-    (time(9, 0), time(13, 0)),
-    (time(15, 0), time(17, 0)),
-]
 
-# Weekdays the school runs (Monday=0 ... Sunday=6). Nothing needs covering on
-# any other day.
-SCHOOL_WEEKDAYS: frozenset[int] = frozenset({0, 1, 2, 3, 4})
-
-# The school year starts on 1 September. Fairness counters (how much each
-# teacher has already substituted) and the admin stats all count from the
-# most recent 1 September, so the load resets every course.
-COURSE_START_MONTH = 9
-
-
-def course_year_start(today: date | None = None) -> datetime:
-    """Midnight (local) on 1 September of the current school year - the most
-    recent 1 September on or before `today`."""
+def course_year_start(today: date | None = None, school: School | None = None) -> datetime:
+    """Midnight (local) on `school`'s school year start date (1 September by
+    default - see School.school_year_start_month/day) for the current school
+    year - the most recent such date on or before `today`. `school` defaults
+    to the one school every pre-multi-school row implicitly belongs to, so
+    existing callers that don't care about more than one school don't need to
+    pass it."""
+    # An unsaved School() carries the same defaults as a persisted one for
+    # the fields this function reads - no DB hit needed just to fall back to
+    # them, which also keeps this usable from DB-less (SimpleTestCase) tests.
+    school = school or School()
     today = today or timezone.localdate()
-    year = today.year if today.month >= COURSE_START_MONTH else today.year - 1
-    return timezone.make_aware(datetime(year, COURSE_START_MONTH, 1))
+    month, day = school.school_year_start_month, school.school_year_start_day
+    year = today.year if today.month >= month else today.year - 1
+    return timezone.make_aware(datetime(year, month, day))
 
 
 def format_duration(td: timedelta) -> str:
@@ -65,15 +59,17 @@ def format_duration(td: timedelta) -> str:
 def coverage_done_for(teacher) -> timedelta:
     """Total time `teacher` has covered in substitutions since the course year
     started (see `course_year_start`), as a timedelta."""
-    annotated = _with_coverage_done(Teacher.objects.filter(pk=teacher.pk)).first()
+    annotated = _with_coverage_done(Teacher.objects.filter(pk=teacher.pk), teacher.school).first()
     return annotated.coverage_done if annotated else timedelta()
 
 
-def _with_coverage_done(teachers):
+def _with_coverage_done(teachers, school: School):
     """Annotate a Teacher queryset with `coverage_done`: the summed duration of
-    the substitutions the teacher has done since the start of the current
-    course year (see `course_year_start`), as a timedelta (0 for teachers who've
-    done none). Last year's load doesn't carry over."""
+    the substitutions the teacher has done since the start of `school`'s
+    current course year (see `course_year_start`), as a timedelta (0 for
+    teachers who've done none). Last year's load doesn't carry over. Every
+    teacher in `teachers` is assumed to belong to `school` already - this
+    only picks which course year to count from, it doesn't filter rows."""
     return teachers.annotate(
         coverage_done=Coalesce(
             Sum(
@@ -81,7 +77,7 @@ def _with_coverage_done(teachers):
                     F("substitutions_done__end_datetime") - F("substitutions_done__start_datetime"),
                     output_field=DurationField(),
                 ),
-                filter=Q(substitutions_done__start_datetime__gte=course_year_start()),
+                filter=Q(substitutions_done__start_datetime__gte=course_year_start(school=school)),
             ),
             timedelta(),
             output_field=DurationField(),
@@ -138,10 +134,12 @@ def _subtract_intervals(range_start, range_end, remove: list[tuple[datetime, dat
     return result
 
 
-def _outside_working_hours(start_dt, end_dt) -> list[tuple[datetime, datetime]]:
-    """Datetime intervals within [start_dt, end_dt) that fall outside the
-    school's working hours, one entry per day touched. A day the school doesn't
-    run at all (weekend) counts as entirely outside working hours."""
+def _outside_working_hours(start_dt, end_dt, school: School) -> list[tuple[datetime, datetime]]:
+    """Datetime intervals within [start_dt, end_dt) that fall outside
+    `school`'s working hours, one entry per day touched. A day the school
+    doesn't run at all (weekend) counts as entirely outside working hours."""
+    working_hours = school.working_hours_as_times()
+    working_weekdays = school.working_weekdays_set()
     intervals = []
     for day, seg_start, seg_end in _daily_segments(start_dt, end_dt):
         day_start = timezone.make_aware(datetime.combine(day, seg_start))
@@ -151,9 +149,9 @@ def _outside_working_hours(start_dt, end_dt) -> list[tuple[datetime, datetime]]:
                 timezone.make_aware(datetime.combine(day, max(w_start, seg_start))),
                 timezone.make_aware(datetime.combine(day, min(w_end, seg_end))),
             )
-            for w_start, w_end in WORKING_HOURS
+            for w_start, w_end in working_hours
             if w_start < seg_end and w_end > seg_start
-        ] if day.weekday() in SCHOOL_WEEKDAYS else []
+        ] if day.weekday() in working_weekdays else []
         intervals.extend(_subtract_intervals(day_start, day_end, working_today))
     return intervals
 
@@ -202,7 +200,7 @@ def coverage_needed(teacher: Teacher, start_dt, end_dt) -> list[tuple[datetime, 
     requested time."""
     requester_free = _merged_intervals_for_range(teacher, start_dt, end_dt)
     head_free = _co_teaching_head_free(teacher, start_dt, end_dt)
-    non_working = _outside_working_hours(start_dt, end_dt)
+    non_working = _outside_working_hours(start_dt, end_dt, teacher.school)
     return _subtract_intervals(start_dt, end_dt, requester_free + head_free + non_working)
 
 
@@ -295,17 +293,19 @@ def _coverage_segments(absence: Absence, start_dt, end_dt) -> list[tuple[date, t
 
 def _candidate_pool(absence: Absence, start_dt, end_dt):
     """Teachers who could conceivably cover part of [start_dt, end_dt): active,
-    not the absent teacher, not away on their own absence then, and not
-    already committed to holding a co-taught room alone over that time (see
-    `_co_teaching_auto_coverage`). Teachers already substituting elsewhere are
-    still included - they're shown in the picker, just not selectable."""
+    at the same school as the absent teacher, not the absent teacher, not
+    away on their own absence then, and not already committed to holding a
+    co-taught room alone over that time (see `_co_teaching_auto_coverage`).
+    Teachers already substituting elsewhere are still included - they're
+    shown in the picker, just not selectable."""
+    school = absence.teacher.school
     busy_with_own_absence = (
-        Absence.objects.filter(start_datetime__lt=end_dt, end_datetime__gt=start_dt)
+        Absence.objects.filter(start_datetime__lt=end_dt, end_datetime__gt=start_dt, teacher__school=school)
         .exclude(pk=absence.pk)
         .values_list("teacher_id", flat=True)
     )
     co_teaching_assistants = (
-        WeeklyNonTeachingHours.objects.filter(kind=NonTeachingHoursKind.CO_TEACHING)
+        WeeklyNonTeachingHours.objects.filter(kind=NonTeachingHoursKind.CO_TEACHING, teacher__school=school)
         .exclude(head__isnull=True)
         .values_list("teacher_id", flat=True)
         .distinct()
@@ -316,7 +316,7 @@ def _candidate_pool(absence: Absence, start_dt, end_dt):
         if _co_teaching_auto_coverage(teacher, start_dt, end_dt)
     ]
     return (
-        Teacher.objects.filter(active=True)
+        Teacher.objects.filter(active=True, school=school)
         .exclude(pk=absence.teacher_id)
         .exclude(pk__in=list(busy_with_own_absence))
         .exclude(pk__in=busy_auto_covering)
@@ -340,17 +340,18 @@ def _find_available_substitutes_for_range(absence: Absence, start_dt, end_dt) ->
     if not segments:
         return []  # nothing to cover in this window - no one is "needed"
 
+    school = absence.teacher.school
     busy_substituting = set(
         Substitution.objects.filter(
-            start_datetime__lt=end_dt, end_datetime__gt=start_dt
+            start_datetime__lt=end_dt, end_datetime__gt=start_dt, substitute_teacher__school=school
         ).values_list("substitute_teacher_id", flat=True)
     )
 
-    candidates = _with_coverage_done(_candidate_pool(absence, start_dt, end_dt)).order_by(
+    candidates = _with_coverage_done(_candidate_pool(absence, start_dt, end_dt), school).order_by(
         "coverage_done", "user__last_name", "user__first_name"
     )
 
-    priority_by_kind = NonTeachingHoursPriority.ordering_map()
+    priority_by_kind = NonTeachingHoursPriority.ordering_map(school)
     best_priority = min(priority_by_kind.values())
     label_by_priority: dict[int, str] = {}
     for kind, priority in priority_by_kind.items():
@@ -491,6 +492,8 @@ def can_offer(absence: Absence, teacher: Teacher, start_dt, end_dt) -> bool:
         return False
     if not _is_slot_aligned(start_dt) or not _is_slot_aligned(end_dt):
         return False
+    if teacher.school_id != absence.teacher.school_id:
+        return False
     if coverage_needed(absence.teacher, start_dt, end_dt) != [(start_dt, end_dt)]:
         return False
     if _overlaps(
@@ -530,7 +533,7 @@ def grid_slots(absence: Absence) -> list[dict]:
     reason is None when the slot needs a substitute, else "covered",
     "outside_working_hours", "requester_free" or "co_teaching_head"."""
     span_start, span_end = _slot_span(absence)
-    non_working = _outside_working_hours(span_start, span_end)
+    non_working = _outside_working_hours(span_start, span_end, absence.teacher.school)
     requester_free = _merged_intervals_for_range(absence.teacher, span_start, span_end)
     head_free = _co_teaching_head_free(absence.teacher, span_start, span_end)
     covered = [(sub.start_datetime, sub.end_datetime) for sub in absence.substitutions.all()]
@@ -580,13 +583,14 @@ def build_coverage_grid(absence: Absence) -> dict:
       needs_cover - whether any slot still needs a substitute
     """
     span_start, span_end = _slot_span(absence)
+    school = absence.teacher.school
     slots = grid_slots(absence)
     needs_cover = {slot["index"] for slot in slots if slot["reason"] is None}
 
-    priority_by_kind = NonTeachingHoursPriority.ordering_map()
+    priority_by_kind = NonTeachingHoursPriority.ordering_map(school)
     subs_by_teacher: dict[int, list[tuple[datetime, datetime]]] = {}
     for teacher_id, sub_start, sub_end in Substitution.objects.filter(
-        start_datetime__lt=span_end, end_datetime__gt=span_start
+        start_datetime__lt=span_end, end_datetime__gt=span_start, substitute_teacher__school=school
     ).values_list("substitute_teacher_id", "start_datetime", "end_datetime"):
         subs_by_teacher.setdefault(teacher_id, []).append((sub_start, sub_end))
     pending_by_teacher: dict[int, list[tuple[datetime, datetime]]] = {}
@@ -608,7 +612,7 @@ def build_coverage_grid(absence: Absence) -> dict:
     }
 
     columns = []
-    pool = _with_coverage_done(_candidate_pool(absence, span_start, span_end)).select_related("user")
+    pool = _with_coverage_done(_candidate_pool(absence, span_start, span_end), school).select_related("user")
     for teacher in pool:
         day_blocks_cache: dict[int, list[tuple[time, time, str]]] = {}
         teacher_subs = subs_by_teacher.get(teacher.pk, [])
@@ -721,8 +725,8 @@ class AgendaEntry:
     status: str  # "confirmed" | "pending" | "uncovered"
 
 
-def coverage_agenda(now: datetime | None = None) -> list[dict]:
-    """Every teacher's substitution activity from the start of today onward,
+def coverage_agenda(school: School, now: datetime | None = None) -> list[dict]:
+    """`school`'s substitution activity from the start of today onward,
     grouped by day for a per-day agenda. Each returned item is
     `{"day": <aware datetime at midnight>, "entries": [AgendaEntry, ...]}`,
     days in chronological order, entries within a day ordered by time.
@@ -735,17 +739,17 @@ def coverage_agenda(now: datetime | None = None) -> list[dict]:
     horizon = timezone.make_aware(datetime.combine(timezone.localtime(now).date(), time.min))
 
     subs = list(
-        Substitution.objects.filter(end_datetime__gt=horizon).select_related(
-            "absence__teacher__user", "substitute_teacher__user"
-        )
+        Substitution.objects.filter(
+            end_datetime__gt=horizon, absence__teacher__school=school
+        ).select_related("absence__teacher__user", "substitute_teacher__user")
     )
     offers = list(
         SubstitutionOffer.objects.filter(
-            status=SubstitutionOffer.Status.PENDING, end_datetime__gt=horizon
+            status=SubstitutionOffer.Status.PENDING, end_datetime__gt=horizon, absence__teacher__school=school
         ).select_related("absence__teacher__user", "substitute_teacher__user")
     )
     absences = (
-        Absence.objects.filter(end_datetime__gt=horizon)
+        Absence.objects.filter(end_datetime__gt=horizon, teacher__school=school)
         .select_related("teacher__user")
         .prefetch_related("substitutions")
     )

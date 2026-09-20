@@ -1,11 +1,11 @@
 from django.contrib import messages
-from django.contrib.auth.decorators import login_required
 from django.db.models import Count, Q
 from django.shortcuts import get_object_or_404, redirect, render
 from django.utils import timezone
 from django.utils.translation import gettext as _
 from django.utils.translation import ngettext
 
+from schools.decorators import same_school_required
 from teachers.models import Teacher
 
 from . import emails
@@ -24,9 +24,9 @@ from .services import (
 )
 
 
-@login_required
+@same_school_required
 def dashboard(request):
-    teacher = get_object_or_404(Teacher, user=request.user)
+    teacher = get_object_or_404(Teacher, user=request.user, school=request.school)
     expire_stale_offers()
 
     my_absences = list(
@@ -43,7 +43,7 @@ def dashboard(request):
 
     covering = (
         Substitution.objects.filter(
-            substitute_teacher=teacher, start_datetime__gte=course_year_start()
+            substitute_teacher=teacher, start_datetime__gte=course_year_start(school=teacher.school)
         )
         .select_related("absence", "absence__teacher")
         .order_by("start_datetime")
@@ -62,16 +62,16 @@ def dashboard(request):
             "my_absences": my_absences,
             "covering": covering,
             "covered_total_label": covered_total_label,
-            "course_year_start": course_year_start(),
+            "course_year_start": course_year_start(school=teacher.school),
             "my_pending_offers": my_pending_offers,
-            "agenda": coverage_agenda(),
+            "agenda": coverage_agenda(teacher.school),
         },
     )
 
 
-@login_required
+@same_school_required
 def report_absence(request):
-    teacher = get_object_or_404(Teacher, user=request.user)
+    teacher = get_object_or_404(Teacher, user=request.user, school=request.school)
     if request.method == "POST":
         form = AbsenceForm(request.POST, teacher=teacher)
         if form.is_valid():
@@ -84,9 +84,9 @@ def report_absence(request):
     return render(request, "substitutions/report_absence.html", {"form": form})
 
 
-@login_required
+@same_school_required
 def delete_absence(request, absence_id):
-    teacher = get_object_or_404(Teacher, user=request.user)
+    teacher = get_object_or_404(Teacher, user=request.user, school=request.school)
     absence = get_object_or_404(Absence, pk=absence_id, teacher=teacher)
 
     if absence.start_datetime.date() <= timezone.now().date():
@@ -104,9 +104,9 @@ def delete_absence(request, absence_id):
     return render(request, "substitutions/delete_absence.html", {"absence": absence})
 
 
-@login_required
+@same_school_required
 def pick_substitute(request, absence_id):
-    teacher = get_object_or_404(Teacher, user=request.user)
+    teacher = get_object_or_404(Teacher, user=request.user, school=request.school)
     absence = get_object_or_404(Absence, pk=absence_id, teacher=teacher)
     expire_stale_offers()
 
@@ -137,7 +137,7 @@ def _send_offers(request, absence):
 
     sent = 0
     for teacher_id, indexes in by_teacher.items():
-        teacher = Teacher.objects.filter(pk=teacher_id).first()
+        teacher = Teacher.objects.filter(pk=teacher_id, school=absence.teacher.school).first()
         if teacher is None:
             continue
         for run_start, run_end in _contiguous_runs(sorted(set(indexes))):
@@ -170,9 +170,9 @@ def _contiguous_runs(indexes):
     return runs
 
 
-@login_required
+@same_school_required
 def respond_to_offer(request, offer_id):
-    teacher = get_object_or_404(Teacher, user=request.user)
+    teacher = get_object_or_404(Teacher, user=request.user, school=request.school)
     offer = get_object_or_404(SubstitutionOffer, pk=offer_id, substitute_teacher=teacher)
     decline_form = DeclineOfferForm()
 
