@@ -339,7 +339,7 @@ class FindAvailableSubstitutesTests(TestCase):
     def test_priorities_are_seeded_by_migration(self):
         self.assertEqual(
             NonTeachingHoursPriority.ordering_map(self.absent.school),
-            {"free": 0, "paperwork": 10, "co_teaching": 20, "escoltam": 30, "poesia": 40, "cicle": 50},
+            {"free": 0, "paperwork": 10, "co_teaching": 20, "escoltam": 30, "poesia": 40, "cicle": 50, "reforc": 60},
         )
 
     def test_reordering_priorities_changes_the_ranking(self):

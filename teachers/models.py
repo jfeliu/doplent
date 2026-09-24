@@ -61,12 +61,14 @@ class NonTeachingHoursKind(models.TextChoices):
     ESCOLTAM = "escoltam", _("Escolta'm")
     POESIA = "poesia", "POESIA"
     CICLE = "cicle", "Cicle"
+    REFORC = "reforc", "Reforç"
 
 
 # The default ordering a newly created School's NonTeachingHoursPriority rows
 # are seeded with - see schools.admin.SchoolAdmin, and teachers/migrations/
 # 0004_non_teaching_hours_kind.py + 0007_add_poesia_and_cicle_non_teaching_kinds.py
-# for how the one pre-existing school got these same values.
+# + 0010_add_reforc_non_teaching_kind.py for how the pre-existing schools got
+# these same values.
 DEFAULT_NON_TEACHING_HOURS_PRIORITIES = [
     (NonTeachingHoursKind.FREE, 0),
     (NonTeachingHoursKind.PAPERWORK, 10),
@@ -74,6 +76,7 @@ DEFAULT_NON_TEACHING_HOURS_PRIORITIES = [
     (NonTeachingHoursKind.ESCOLTAM, 30),
     (NonTeachingHoursKind.POESIA, 40),
     (NonTeachingHoursKind.CICLE, 50),
+    (NonTeachingHoursKind.REFORC, 60),
 ]
 
 
