@@ -7,11 +7,12 @@
   {% blocktranslate trimmed %}
   List the recurring times each week when you're at school but not teaching a class.
   Those are the only times you can be suggested as a substitute. Set each block's
-  type - free, paperwork, co-teaching or escolta'm: you'll still be suggested
+  type - free, paperwork, co-teaching, Reforç or escolta'm: you'll still be suggested
   during any of them, but the picker draws teachers off free time first and
-  escolta'm last. For a co-teaching block, name the class's head teacher - if
-  they're away, you hold the room, so no substitute is called for them then.
-  Leave a row's day blank and it will be ignored; check "Delete" to remove a row.
+  escolta'm last. Co-teaching and Reforç blocks need a head teacher named; for
+  co-teaching, if they're away you hold the room, so no substitute is called for
+  them then. Leave a row's day blank and it will be ignored; check "Delete" to
+  remove a row.
   {% endblocktranslate %}
 </p>
 <div class="card">
@@ -32,7 +33,7 @@
               <th>{% translate "Free from" %}</th>
               <th>{% translate "Free until" %}</th>
               <th>{% translate "Type" %}</th>
-              <th>{% translate "Co-teaching head" %}</th>
+              <th>{% translate "Head teacher" %}</th>
               <th>{% translate "Delete" %}</th>
             </tr>
           </thead>

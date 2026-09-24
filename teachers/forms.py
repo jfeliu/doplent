@@ -1,7 +1,7 @@
 from django import forms
 from django.utils.translation import gettext_lazy as _
 
-from .models import NonTeachingHoursKind, Teacher, WeeklyNonTeachingHours
+from .models import HEAD_REQUIRED_KINDS, Teacher, WeeklyNonTeachingHours
 
 
 class NonTeachingHoursForm(forms.ModelForm):
@@ -15,9 +15,9 @@ class NonTeachingHoursForm(forms.ModelForm):
 
     def __init__(self, *args, owner=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields["head"].label = _("Co-teaching head")
+        self.fields["head"].label = _("Head teacher")
         # Only active teachers at the same school can lead a class, and never
-        # the owner of the row (a teacher can't be their own co-teaching head).
+        # the owner of the row (a teacher can't be their own head teacher).
         head_qs = Teacher.objects.filter(active=True).select_related("user")
         if owner is not None:
             head_qs = head_qs.filter(school=owner.school).exclude(pk=owner.pk)
@@ -28,9 +28,9 @@ class NonTeachingHoursForm(forms.ModelForm):
         start, end = cleaned.get("start_time"), cleaned.get("end_time")
         if start and end and end <= start:
             raise forms.ValidationError(_("End time must be after start time."))
-        if cleaned.get("kind") == NonTeachingHoursKind.CO_TEACHING and not cleaned.get("head"):
-            self.add_error("head", _("Pick the teacher who leads this co-taught class."))
-        if cleaned.get("kind") != NonTeachingHoursKind.CO_TEACHING:
+        if cleaned.get("kind") in HEAD_REQUIRED_KINDS and not cleaned.get("head"):
+            self.add_error("head", _("Pick this block's head teacher."))
+        if cleaned.get("kind") not in HEAD_REQUIRED_KINDS:
             cleaned["head"] = None
         return cleaned
 

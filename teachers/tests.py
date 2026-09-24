@@ -352,6 +352,17 @@ class CoTeachingHeadModelAndFormTests(TestCase):
         with self.assertRaises(ValidationError):
             self._block(jane, NonTeachingHoursKind.CO_TEACHING, None).clean()
 
+    def test_model_clean_requires_a_head_for_reforc(self):
+        jane = make_teacher("Jane", "Doe")
+        with self.assertRaises(ValidationError):
+            self._block(jane, NonTeachingHoursKind.REFORC, None).clean()
+
+    def test_model_clean_accepts_a_head_for_reforc(self):
+        jane, john = make_teacher("Jane", "Doe"), make_teacher("John", "Smith")
+        block = self._block(jane, NonTeachingHoursKind.REFORC, john)
+        block.clean()  # does not raise
+        self.assertEqual(block.head, john)
+
     def test_model_clean_drops_a_stray_head_on_non_co_teaching(self):
         jane, john = make_teacher("Jane", "Doe"), make_teacher("John", "Smith")
         block = self._block(jane, NonTeachingHoursKind.FREE, john)
@@ -362,6 +373,11 @@ class CoTeachingHeadModelAndFormTests(TestCase):
         jane = make_teacher("Jane", "Doe")
         with self.assertRaises(ValidationError):
             self._block(jane, NonTeachingHoursKind.CO_TEACHING, jane).clean()
+
+    def test_model_clean_rejects_being_your_own_head_for_reforc(self):
+        jane = make_teacher("Jane", "Doe")
+        with self.assertRaises(ValidationError):
+            self._block(jane, NonTeachingHoursKind.REFORC, jane).clean()
 
     def test_schedule_form_head_choices_exclude_self_and_inactive(self):
         jane = make_teacher("Jane", "Doe")
@@ -377,6 +393,18 @@ class CoTeachingHeadModelAndFormTests(TestCase):
             data={
                 "weekday": MONDAY, "start_time": "10:00", "end_time": "11:00",
                 "kind": NonTeachingHoursKind.CO_TEACHING, "head": "",
+            },
+        )
+        self.assertFalse(form.is_valid())
+        self.assertIn("head", form.errors)
+
+    def test_schedule_form_flags_a_reforc_row_with_no_head(self):
+        jane = make_teacher("Jane", "Doe")
+        form = NonTeachingHoursForm(
+            owner=jane,
+            data={
+                "weekday": MONDAY, "start_time": "10:00", "end_time": "11:00",
+                "kind": NonTeachingHoursKind.REFORC, "head": "",
             },
         )
         self.assertFalse(form.is_valid())

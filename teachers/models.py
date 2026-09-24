@@ -64,6 +64,13 @@ class NonTeachingHoursKind(models.TextChoices):
     REFORC = "reforc", "Reforç"
 
 
+# Kinds where WeeklyNonTeachingHours.head is mandatory rather than forbidden -
+# see WeeklyNonTeachingHours.clean() and NonTeachingHoursForm.clean(). Reforç
+# reuses the co-teaching rule (name the teacher this block supports) rather
+# than getting its own field.
+HEAD_REQUIRED_KINDS = frozenset({NonTeachingHoursKind.CO_TEACHING, NonTeachingHoursKind.REFORC})
+
+
 # The default ordering a newly created School's NonTeachingHoursPriority rows
 # are seeded with - see schools.admin.SchoolAdmin, and teachers/migrations/
 # 0004_non_teaching_hours_kind.py + 0007_add_poesia_and_cicle_non_teaching_kinds.py
@@ -146,20 +153,22 @@ class WeeklyNonTeachingHours(models.Model):
         default=NonTeachingHoursKind.FREE,
         verbose_name=_("kind"),
     )
-    # For co-teaching blocks only: the teacher who leads the co-taught class.
-    # When the head is absent the co-teacher runs the room, so the head needs no
-    # substitute for that slot (see substitutions.services). Required whenever
-    # kind is co_teaching, and must be someone other than `teacher`. Hard-deleting
-    # the head takes the (now meaningless) co-teaching block with it - in normal
-    # use teachers are deactivated, not deleted, and that keeps the block intact.
+    # The teacher this block is attached to - for co-teaching, the class's
+    # lead teacher (when the head is absent the co-teacher runs the room, so
+    # the head needs no substitute for that slot - see substitutions.services);
+    # for Reforç, the teacher being supported. Required whenever kind is in
+    # HEAD_REQUIRED_KINDS, and must be someone other than `teacher`.
+    # Hard-deleting the head takes the (now meaningless) block with it - in
+    # normal use teachers are deactivated, not deleted, and that keeps the
+    # block intact.
     head = models.ForeignKey(
         Teacher,
         on_delete=models.CASCADE,
         null=True,
         blank=True,
         related_name="co_teaching_led",
-        verbose_name=_("co-teaching head"),
-        help_text=_("The teacher who leads this co-taught class. Required for co-teaching blocks."),
+        verbose_name=_("head teacher"),
+        help_text=_("The teacher this block is with. Required for co-teaching and Reforç blocks."),
     )
 
     objects = SchoolScopedManager(school_field="teacher__school")
@@ -170,10 +179,12 @@ class WeeklyNonTeachingHours(models.Model):
         verbose_name_plural = _("weekly non-teaching hours")
         constraints = [
             models.CheckConstraint(check=models.Q(end_time__gt=models.F("start_time")), name="end_after_start"),
-            # "co-teaching needs a head" is enforced in Model.clean(), the import
-            # and the schedule form (every write path), not as a DB check - that
-            # would block migrating databases that already hold headless
-            # co-teaching blocks from before this field existed.
+            # "a HEAD_REQUIRED_KINDS block needs a head" is enforced in
+            # Model.clean(), the import and the schedule form (every write
+            # path), not as a DB check - that would block migrating databases
+            # that already hold headless co-teaching blocks from before this
+            # field existed. The constraint name predates Reforç but still
+            # applies to it - "a block's head is never its own teacher".
             models.CheckConstraint(
                 check=~models.Q(head=models.F("teacher")),
                 name="co_teaching_head_is_not_self",
@@ -185,9 +196,9 @@ class WeeklyNonTeachingHours(models.Model):
 
     def clean(self):
         super().clean()
-        if self.kind != NonTeachingHoursKind.CO_TEACHING:
+        if self.kind not in HEAD_REQUIRED_KINDS:
             self.head = None
         elif self.head_id is None:
-            raise ValidationError({"head": _("A co-teaching block needs a head teacher.")})
+            raise ValidationError({"head": _("This block needs a head teacher.")})
         if self.head_id and self.teacher_id and self.head_id == self.teacher_id:
             raise ValidationError({"head": _("The head teacher must be a different teacher.")})
