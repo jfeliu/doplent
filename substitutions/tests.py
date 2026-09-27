@@ -53,6 +53,15 @@ def next_monday_dt(hour, minute=0):
     return timezone.make_aware(datetime.datetime.combine(monday, datetime.time(hour, minute)))
 
 
+def next_future_dt(month, day, hour, minute=0):
+    """The next upcoming `month`/`day` (this year, or next if already past), for
+    fixtures that must stay in the future no matter when this suite runs -
+    e.g. a fixed summer date used to check DST-aware rendering."""
+    today = timezone.localdate()
+    year = today.year if (month, day) > (today.month, today.day) else today.year + 1
+    return timezone.make_aware(datetime.datetime(year, month, day, hour, minute))
+
+
 def result_for(results, teacher):
     """find_available_substitutes returns fresh instances with ranking attributes
     set on them; look up the one matching `teacher` by pk instead of relying on
@@ -1285,6 +1294,46 @@ class DashboardCoveredTotalTests(TestCase):
 
 
 @override_settings(LANGUAGE_CODE="en")
+class DashboardHidesPastItemsTests(TestCase):
+    """"My absences" and "Substitutions I'm covering" are for what's still
+    relevant - past entries would just pile up as noise."""
+
+    def test_past_absence_is_not_listed(self):
+        teacher = make_teacher("past_absence_teacher")
+        Absence.objects.create(
+            teacher=teacher, start_datetime=course_dt(1, 9), end_datetime=course_dt(1, 11)
+        )
+        upcoming = Absence.objects.create(
+            teacher=teacher, start_datetime=next_monday_dt(9), end_datetime=next_monday_dt(11)
+        )
+        self.client.force_login(teacher.user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertNotContains(response, "No absences reported yet.")
+        self.assertContains(response, reverse("pick_substitute", args=[upcoming.id]))
+        self.assertEqual(response.context["my_absences"], [upcoming])
+
+    def test_past_substitution_is_not_listed_but_still_counted(self):
+        absent = make_teacher("past_sub_absent")
+        covering = make_teacher("past_sub_covering")
+        past_absence = Absence.objects.create(
+            teacher=absent, start_datetime=course_dt(1, 9), end_datetime=course_dt(1, 11)
+        )
+        make_substitution(past_absence, covering)
+        future_absence = Absence.objects.create(
+            teacher=absent, start_datetime=next_monday_dt(9), end_datetime=next_monday_dt(11)
+        )
+        future_sub = make_substitution(future_absence, covering)
+        self.client.force_login(covering.user)
+
+        response = self.client.get(reverse("dashboard"))
+
+        self.assertEqual(list(response.context["covering"]), [future_sub])
+        self.assertContains(response, "4h")  # both substitutions still count toward the total
+
+
+@override_settings(LANGUAGE_CODE="en")
 class DashboardCoverageAgendaTests(TestCase):
     """The dashboard's "Everyone's coverage" agenda: all teachers' upcoming
     substitution activity, confirmed, pending or still uncovered."""
@@ -1362,10 +1411,11 @@ class CaDateFormattingTests(TestCase):
 
     def test_dashboard_shows_local_start_time(self):
         teacher = make_teacher("tz_dashboard")
+        summer = next_future_dt(6, 1, 9)
         Absence.objects.create(
             teacher=teacher,
-            start_datetime=dt(2026, 6, 1, 9),
-            end_datetime=dt(2026, 6, 1, 17),
+            start_datetime=summer,
+            end_datetime=summer.replace(hour=17),
         )
         self.client.force_login(teacher.user)
 

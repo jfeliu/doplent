@@ -29,21 +29,26 @@ def dashboard(request):
     teacher = get_object_or_404(Teacher, user=request.user, school=request.school)
     expire_stale_offers()
 
+    now = timezone.now()
     my_absences = list(
-        teacher.absences.prefetch_related("substitutions__substitute_teacher").annotate(
+        teacher.absences.filter(end_datetime__gte=now)
+        .prefetch_related("substitutions__substitute_teacher")
+        .annotate(
             pending_offers_count=Count(
                 "offers", filter=Q(offers__status=SubstitutionOffer.Status.PENDING)
             )
         )
     )
-    today = timezone.now().date()
+    today = now.date()
     for absence in my_absences:
         absence.is_fully_covered = not uncovered_ranges(absence)
         absence.is_future = absence.start_datetime.date() > today
 
     covering = (
         Substitution.objects.filter(
-            substitute_teacher=teacher, start_datetime__gte=course_year_start(school=teacher.school)
+            substitute_teacher=teacher,
+            start_datetime__gte=course_year_start(school=teacher.school),
+            end_datetime__gte=now,
         )
         .select_related("absence", "absence__teacher")
         .order_by("start_datetime")
