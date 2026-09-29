@@ -6,7 +6,13 @@ from django.test import SimpleTestCase, TestCase, override_settings
 from django.urls import reverse
 from django.utils import timezone
 
-from teachers.models import NonTeachingHoursKind, NonTeachingHoursPriority, Teacher, WeeklyNonTeachingHours
+from teachers.models import (
+    HEAD_REQUIRED_KINDS,
+    NonTeachingHoursKind,
+    NonTeachingHoursPriority,
+    Teacher,
+    WeeklyNonTeachingHours,
+)
 
 from .models import Absence, Substitution, SubstitutionOffer
 from .offers import decline_offer
@@ -460,7 +466,7 @@ class PickSubstituteViewTests(TestCase):
 
 
 def _weekday_block(teacher, start, end, kind=NonTeachingHoursKind.FREE, head=None):
-    if kind == NonTeachingHoursKind.CO_TEACHING and head is None:
+    if kind in HEAD_REQUIRED_KINDS and head is None:
         head = make_teacher(f"{teacher.user.username}_head")
     return WeeklyNonTeachingHours.objects.create(
         teacher=teacher,
@@ -812,6 +818,56 @@ class CoTeachingHeadCoverageTests(TestCase):
             teacher=self.co_teacher, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
         )
         other = make_teacher("coteach_other_absentee2")
+        other_absence = Absence.objects.create(
+            teacher=other, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
+        )
+        self.assertNotIn(self.head, find_available_substitutes(other_absence))
+        self.assertFalse(can_offer(other_absence, self.head, dt(2024, 1, 8, 10), dt(2024, 1, 8, 11)))
+
+
+class ReforcHeadCoverageTests(TestCase):
+    """Reforç blocks name a "head" (the teacher being supported) just like
+    co-teaching, and share the same absence-coverage rule: if either teacher is
+    absent, the other one holds the room and no substitute is sought - see
+    `CoTeachingHeadCoverageTests`."""
+
+    def setUp(self):
+        # 2024-01-08 is a Monday; _weekday_block always lands on Monday.
+        self.head = make_teacher("reforc_head")
+        self.support = make_teacher("reforc_support")
+        _weekday_block(
+            self.support, datetime.time(10, 0), datetime.time(11, 0),
+            kind=NonTeachingHoursKind.REFORC, head=self.head,
+        )
+        self.absence = Absence.objects.create(
+            teacher=self.head, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
+        )
+
+    def test_head_absence_over_the_reforc_block_needs_no_substitute(self):
+        self.assertEqual(uncovered_ranges(self.absence), [])
+        self.assertEqual(find_available_substitutes(self.absence), [])
+        grid = build_coverage_grid(self.absence)
+        self.assertFalse(grid["needs_cover"])
+        self.assertEqual({row["reason"] for row in grid["rows"]}, {"co_teaching_head"})
+
+    def test_supporting_teacher_covering_for_the_head_is_not_offered_elsewhere(self):
+        other = make_teacher("reforc_other_absentee")
+        other_absence = Absence.objects.create(
+            teacher=other, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
+        )
+        self.assertNotIn(self.support, find_available_substitutes(other_absence))
+        self.assertFalse(can_offer(other_absence, self.support, dt(2024, 1, 8, 10), dt(2024, 1, 8, 11)))
+
+    def test_head_is_never_offered_over_the_reforc_block_even_when_the_support_is_absent(self):
+        # Mirror case: the supporting teacher is absent, so the head simply
+        # teaches the block alone and no substitute is ever sought for it. The
+        # head must not be offered as a substitute for someone else's absence
+        # at that same hour either - the Reforç block only lives on the
+        # supporting teacher's own schedule.
+        Absence.objects.create(
+            teacher=self.support, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
+        )
+        other = make_teacher("reforc_other_absentee2")
         other_absence = Absence.objects.create(
             teacher=other, start_datetime=dt(2024, 1, 8, 10), end_datetime=dt(2024, 1, 8, 11)
         )

@@ -583,6 +583,11 @@ msgstr ""
 "Clica els blocs de 30 minuts lliures per triar qui cobreix què. Selecciona "
 "diversos períodes per a diversos docents i envia totes les ofertes alhora."
 
+msgid "Ordered by priority: the substitute picker draws from the first colour before moving to the next."
+msgstr ""
+"Ordre de prioritat: primer es proposen les hores del primer color; només "
+"es passa a les següents si cal."
+
 msgid "Send offers"
 msgstr "Envia les ofertes"
 

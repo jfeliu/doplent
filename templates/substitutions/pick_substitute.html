@@ -37,9 +37,14 @@
   }
   .cov-cell.pending { opacity: .85; }
   .cov-cell.locked { opacity: .55; }
-  .cov-cell.pending[data-kind="paperwork"], .cov-cell.locked[data-kind="paperwork"] { --k: #d97706; }
-  .cov-cell.pending[data-kind="co_teaching"], .cov-cell.locked[data-kind="co_teaching"] { --k: #2563eb; }
-  .cov-cell.pending[data-kind="escoltam"], .cov-cell.locked[data-kind="escoltam"] { --k: #7c3aed; }
+  /* Non-teaching-hours kind colours - shared by grid cells and the legend swatches */
+  [data-kind="free"] { --k: #16a34a; }
+  [data-kind="paperwork"] { --k: #d97706; }
+  [data-kind="co_teaching"] { --k: #2563eb; }
+  [data-kind="escoltam"] { --k: #7c3aed; }
+  [data-kind="poesia"] { --k: #0d9488; }
+  [data-kind="cicle"] { --k: #a16207; }
+  [data-kind="reforc"] { --k: #be185d; }
   /* locked but the teacher isn't free then: keep the "unavailable" hatch */
   .cov-cell.locked.nofree {
     background: repeating-linear-gradient(45deg, transparent, transparent 5px, rgba(0,0,0,.03) 5px, rgba(0,0,0,.03) 6px);
@@ -67,10 +72,6 @@
     background: color-mix(in srgb, var(--k) 22%, var(--bs-body-bg));
     border-left: 3px solid var(--k);
   }
-  label.cov-cell[data-kind="free"] { --k: #16a34a; }
-  label.cov-cell[data-kind="paperwork"] { --k: #d97706; }
-  label.cov-cell[data-kind="co_teaching"] { --k: #2563eb; }
-  label.cov-cell[data-kind="escoltam"] { --k: #7c3aed; }
   label.cov-cell.declined .cov-fill {
     background: color-mix(in srgb, #dc2626 12%, var(--bs-body-bg));
     border-left-color: #dc2626;
@@ -159,11 +160,11 @@
     </div>
   </div>
 
+  <p class="text-muted small mb-1">{% translate "Ordered by priority: the substitute picker draws from the first colour before moving to the next." %}</p>
   <div class="cov-legend kinds">
-    <span style="--k:#16a34a">{% translate "Free" %}</span>
-    <span style="--k:#d97706">{% translate "Paperwork" %}</span>
-    <span style="--k:#2563eb">{% translate "Co-teaching" %}</span>
-    <span style="--k:#7c3aed">{% translate "Escolta'm" %}</span>
+    {% for item in grid.kind_legend %}
+    <span data-kind="{{ item.kind }}">{{ forloop.counter }}. {{ item.label }}</span>
+    {% endfor %}
   </div>
   <div class="cov-legend markers">
     <span><span class="sw pending"><i class="bi bi-hourglass-split"></i></span> {% translate "Offer sent, awaiting a reply" %}</span>

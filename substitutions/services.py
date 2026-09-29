@@ -9,6 +9,7 @@ from django.utils.translation import gettext_lazy as _
 
 from schools.models import School
 from teachers.models import (
+    HEAD_REQUIRED_KINDS,
     NonTeachingHoursKind,
     NonTeachingHoursPriority,
     Teacher,
@@ -24,7 +25,7 @@ SLOT_REASON_LABELS = {
     "covered": _("Already covered"),
     "outside_working_hours": _("Outside school hours"),
     "requester_free": _("Your own non-teaching time"),
-    "co_teaching_head": _("Co-taught class you lead - the co-teacher covers it"),
+    "co_teaching_head": _("Co-taught or Reforç block you lead - the other teacher covers it"),
 }
 
 
@@ -194,10 +195,10 @@ def coverage_needed(teacher: Teacher, start_dt, end_dt) -> list[tuple[datetime, 
     """The sub-intervals of [start_dt, end_dt) that would actually need a
     substitute: the requested range minus the teacher's own weekly non-teaching
     hours (no one covers a class that wasn't happening anyway), minus any
-    co-taught class the teacher only leads (the co-teacher holds the room - see
-    `_co_teaching_head_free`), and minus any time outside the school's working
-    hours. Empty when the teacher wasn't due to be teaching for any of the
-    requested time."""
+    co-taught or Reforç block the teacher only heads (the other teacher holds
+    the room - see `_co_teaching_head_free`), and minus any time outside the
+    school's working hours. Empty when the teacher wasn't due to be teaching
+    for any of the requested time."""
     requester_free = _merged_intervals_for_range(teacher, start_dt, end_dt)
     head_free = _co_teaching_head_free(teacher, start_dt, end_dt)
     non_working = _outside_working_hours(start_dt, end_dt, teacher.school)
@@ -219,13 +220,14 @@ def _co_teacher_unavailable(teacher_id: int, start_dt, end_dt) -> bool:
 
 def _co_teaching_head_free(teacher: Teacher, start_dt, end_dt) -> list[tuple[datetime, datetime]]:
     """Intervals within [start_dt, end_dt) when `teacher` is only the named head
-    of a co-teaching class: the co-teacher runs the room, so the head's absence
-    needs no substitute then - unless that co-teacher is themselves unavailable
-    (see `_co_teacher_unavailable`), in which case the slot is left needing
-    cover like any other teaching time."""
+    of a co-teaching or Reforç block: the other teacher (co-teacher, or the
+    teacher being supported) runs the room, so the head's absence needs no
+    substitute then - unless that other teacher is themselves unavailable (see
+    `_co_teacher_unavailable`), in which case the slot is left needing cover
+    like any other teaching time."""
     led_blocks = list(
         WeeklyNonTeachingHours.objects.filter(
-            kind=NonTeachingHoursKind.CO_TEACHING, head=teacher
+            kind__in=HEAD_REQUIRED_KINDS, head=teacher
         ).values_list("teacher_id", "weekday", "start_time", "end_time")
     )
     if not led_blocks:
@@ -249,13 +251,13 @@ def _co_teaching_head_free(teacher: Teacher, start_dt, end_dt) -> list[tuple[dat
 
 def _co_teaching_auto_coverage(teacher: Teacher, start_dt, end_dt) -> list[tuple[datetime, datetime]]:
     """Intervals within [start_dt, end_dt) when `teacher` is committed to
-    holding a co-taught room alone because its head reported an absence there
-    and no one else covers it (the mirror of `_co_teaching_head_free`, seen
-    from the co-teacher's side) - they're not free to substitute elsewhere
-    during that time, even though the block is nominally their own
-    non-teaching time."""
+    holding a co-taught or Reforç room alone because its head reported an
+    absence there and no one else covers it (the mirror of
+    `_co_teaching_head_free`, seen from the other teacher's side) - they're not
+    free to substitute elsewhere during that time, even though the block is
+    nominally their own non-teaching time."""
     assisted_blocks = list(
-        WeeklyNonTeachingHours.objects.filter(kind=NonTeachingHoursKind.CO_TEACHING, teacher=teacher)
+        WeeklyNonTeachingHours.objects.filter(kind__in=HEAD_REQUIRED_KINDS, teacher=teacher)
         .exclude(head__isnull=True)
         .values_list("head_id", "weekday", "start_time", "end_time")
     )
@@ -295,9 +297,9 @@ def _candidate_pool(absence: Absence, start_dt, end_dt):
     """Teachers who could conceivably cover part of [start_dt, end_dt): active,
     at the same school as the absent teacher, not the absent teacher, not
     away on their own absence then, and not already committed to holding a
-    co-taught room alone over that time (see `_co_teaching_auto_coverage`).
-    Teachers already substituting elsewhere are still included - they're
-    shown in the picker, just not selectable."""
+    co-taught or Reforç room alone over that time (see
+    `_co_teaching_auto_coverage`). Teachers already substituting elsewhere are
+    still included - they're shown in the picker, just not selectable."""
     school = absence.teacher.school
     busy_with_own_absence = (
         Absence.objects.filter(start_datetime__lt=end_dt, end_datetime__gt=start_dt, teacher__school=school)
@@ -305,7 +307,7 @@ def _candidate_pool(absence: Absence, start_dt, end_dt):
         .values_list("teacher_id", flat=True)
     )
     co_teaching_assistants = (
-        WeeklyNonTeachingHours.objects.filter(kind=NonTeachingHoursKind.CO_TEACHING, teacher__school=school)
+        WeeklyNonTeachingHours.objects.filter(kind__in=HEAD_REQUIRED_KINDS, teacher__school=school)
         .exclude(head__isnull=True)
         .values_list("teacher_id", flat=True)
         .distinct()
@@ -581,6 +583,9 @@ def build_coverage_grid(absence: Absence) -> dict:
                 on the first row of each run of same-reason slots, for a
                 labelled band
       needs_cover - whether any slot still needs a substitute
+      kind_legend - [{kind, label}] for every non-teaching-hours kind, in the
+                school's configured pick order (least disruptive first) - what
+                the legend below the grid draws from
     """
     span_start, span_end = _slot_span(absence)
     school = absence.teacher.school
@@ -711,7 +716,17 @@ def build_coverage_grid(absence: Absence) -> dict:
             }
         )
         previous_reason = reason
-    return {"slots": slots, "columns": columns, "rows": rows, "needs_cover": bool(needs_cover)}
+    kind_legend = [
+        {"kind": kind, "label": NonTeachingHoursKind(kind).label}
+        for kind in sorted(NonTeachingHoursKind.values, key=lambda k: priority_by_kind[k])
+    ]
+    return {
+        "slots": slots,
+        "columns": columns,
+        "rows": rows,
+        "needs_cover": bool(needs_cover),
+        "kind_legend": kind_legend,
+    }
 
 
 @dataclass
